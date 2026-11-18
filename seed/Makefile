@@ -1,7 +1,7 @@
 .DEFAULT_GOAL := build
 JOBS ?= 4
 
-.PHONY: install download-models build model upload program-dfu monitor format format-check check check-patterns check-size check-comment-only update-engine-digests compiledb test viz viz-docs hwtest hwtest-build hwtest-upload hwtest-sim clean help
+.PHONY: install download-models build model upload link link-upload link-fx link-fx-upload program-dfu monitor format format-check check check-patterns check-size check-comment-only update-engine-digests compiledb test viz viz-docs hwtest hwtest-build hwtest-upload hwtest-sim clean help
 install:
 	bash scripts/install.sh
 
@@ -20,6 +20,37 @@ upload: build
 	$(MAKE) -f make/firmware.mk flash-dfu
 
 program-dfu: upload
+
+# The touchscreen link (touchscreen repo, seed-firmware/): the same firmware plus the link, in
+# build/link/ so it never mixes objects with the plain build. make build and make upload are
+# unchanged.
+LINK_MAKE = $(MAKE) -f make/firmware.mk SEED_LINK=1 BUILD_DIR=build/link
+
+link:
+	@command -v arm-none-eabi-g++ >/dev/null || { echo 'Missing ARM compiler; run make install.'; exit 1; }
+	@test -f libs/libDaisy/core/Makefile || { echo 'Run make install first.'; exit 1; }
+	$(MAKE) -C libs/libDaisy -j$(JOBS) OPT=-Os
+	$(LINK_MAKE) all
+
+link-upload: link
+	@command -v dfu-util >/dev/null || { echo 'Run make install first.'; exit 1; }
+	@bash scripts/enter_dfu.sh "$(PORT)"
+	$(LINK_MAKE) flash-dfu
+
+# The link plus the six effects (gate, compressor, drive, chorus, delay, reverb), driven by the
+# touchscreen's full UI. Too big for the internal flash, so it is built for the Daisy bootloader:
+# the app lives in the QSPI flash and is copied into the AXI SRAM at power-up (2 s after it).
+# link-fx-upload backs up the Seed first and installs the bootloader if it isn't there
+# (scripts/flash_boot.sh; --restore FILE puts a backup back). In build/link-fx/.
+link-fx:
+	@command -v arm-none-eabi-g++ >/dev/null || { echo 'Missing ARM compiler; run make install.'; exit 1; }
+	@test -f libs/libDaisy/core/Makefile || { echo 'Run make install first.'; exit 1; }
+	$(MAKE) -C libs/libDaisy -j$(JOBS) OPT=-Os
+	$(MAKE) -f make/firmware.mk SEED_LINK=1 SEED_FX=1 APP_TYPE=BOOT_SRAM LDSCRIPT=make/STM32H750IB_sram_app.lds BUILD_DIR=build/link-fx all
+
+link-fx-upload: link-fx
+	@command -v dfu-util >/dev/null || { echo 'Run make install first.'; exit 1; }
+	bash scripts/flash_boot.sh
 
 monitor:
 	@bash scripts/monitor.sh "$(PORT)"
@@ -131,6 +162,10 @@ help:
 	@echo 'make hwtest   Flash the test firmware, measure SNR, noise, distortion, response and latency through'
 	@echo '              a loopback cable, recheck the main firmware, and write hwtest/results/<time>/report.md.'
 	@echo 'make hwtest-sim Run the hardware suite against a simulated loopback (no board).'
+	@echo 'make link     Build the firmware with the touchscreen link, in build/link/.'
+	@echo 'make link-upload Build it and flash it via USB, as make upload does.'
+	@echo 'make link-fx  Build the link plus the six effects for the Daisy bootloader, in build/link-fx/.'
+	@echo 'make link-fx-upload Build it and flash it (backs up the Seed, installs the bootloader if needed).'
 	@echo 'make monitor  Open USB serial in screen (optional PORT=/dev/cu.usbmodem... or /dev/ttyACM...).'
 	@echo 'make check    Run everything CI runs: both firmware builds, the host tests, the format check and hwtest-sim.'
 	@echo 'make format   Format C/C++ files under src/ and tests/ using .clang-format.'

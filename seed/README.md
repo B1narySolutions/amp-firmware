@@ -31,6 +31,22 @@ in the firmware. On Linux, the installer also installs the build and download
 prerequisites, including the ARM C/C++ libraries, Python 3 and `screen`, and adds
 a udev rule so `make upload` and `make monitor` can reach the Seed without root.
 
+## Touchscreen link (this copy)
+
+This folder is Rocco's `realtime-nam-seed3` at `021e285`, copied into the touchscreen repo. `make build`
+and `make upload` are unchanged (byte-identical firmware). Two more builds add the touchscreen link; its
+protocol code is the touchscreen's own `../firmware/main/seed_link_proto`, compiled unchanged:
+
+| Build | What it adds | Runs from |
+| --- | --- | --- |
+| `make link` / `make link-upload` | The link: amp select (incl. SD profiles), bypass, master and mute, DSP load and meters. The demo build, for the touchscreen's "Seed controls only" page. | Internal flash (the normal layout; about 28 bytes free) |
+| `make link-fx` / `make link-fx-upload` | The link plus the six effects (`../seed-dsp/effects`): gate, compressor, drive, chorus, delay, reverb, driven by the touchscreen's full UI. | QSPI flash through the Daisy bootloader (`scripts/flash_boot.sh` backs up the Seed and installs the bootloader if needed; `--restore FILE` puts a backup back) |
+
+The link runs at 230400 baud: the amp board's 10k series resistors (R8, R9) are fine to 230400 and not
+faster. Wiring to the touchscreen's H3: J3 1 GND to H3 2, J3 2 (TX, the Seed's) to H3 3 (the
+touchscreen's RX), J3 3 (RX) to H3 4 (its TX); the touchscreen's SW1 on UART2. The cabinet EQ keeps each
+amp's default; the touchscreen's CAB switch is ignored.
+
 ## Upload and play
 
 ```sh
