@@ -62,3 +62,25 @@ typedef struct {
     char name[25];
 } seed_link_builtin_t;
 int seed_link_get_builtins(seed_link_builtin_t *out, int max, uint32_t *version);
+
+// "Seed controls only" (any task): while hidden, every effect but the AMP and the CAB is sent to
+// the Seed as off, so an effects build of the Seed plays only what the page shows. The rig keeps
+// the effects' own settings; showing them again sends those.
+void seed_link_set_effects_hidden(bool hidden);
+
+// Tuner (docs/TUNER.md): the Seed hears the guitar and sends its pitch; this side only shows it.
+// seed_link_set_tuner (any task): the tuner page opened (on) or closed. The link sends it at once
+// and repeats it each second while on; a Seed that stops hearing it turns its tuner off and
+// unmutes after 2.5 s.
+void seed_link_set_tuner(bool on, bool mute);
+typedef struct {
+    bool  connected;   // the link is up
+    bool  supported;   // connected to a Seed that reports SLP_STATUS_HAS_TUNER
+    bool  fresh;       // a reading arrived within the last 300 ms
+    float freq_hz;     // 0 = no clear pitch
+    float level_dbfs;  // input RMS
+    uint8_t clarity;   // 0..100
+    bool  mock;        // from tools/mock_seed.py: simulated
+    uint32_t seq;      // counts readings: a new value means a new reading
+} seed_link_tuner_t;
+void seed_link_get_tuner(seed_link_tuner_t *out);

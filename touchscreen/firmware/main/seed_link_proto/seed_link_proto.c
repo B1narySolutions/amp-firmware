@@ -416,6 +416,36 @@ bool slp_meters_unpack(const uint8_t *p, size_t len, slp_meters_t *m) {
     return true;
 }
 
+size_t slp_set_tuner_pack(const slp_set_tuner_t *m, uint8_t *buf, size_t cap) {
+    if (cap < 2 || m->on > 1 || m->mute > 1) return 0;
+    buf[0] = m->on;
+    buf[1] = m->mute;
+    return 2;
+}
+
+bool slp_set_tuner_unpack(const uint8_t *p, size_t len, slp_set_tuner_t *m) {
+    if (len != 2 || p[0] > 1 || p[1] > 1) return false;
+    m->on = p[0];
+    m->mute = p[1];
+    return true;
+}
+
+size_t slp_tuner_pack(const slp_tuner_t *m, uint8_t *buf, size_t cap) {
+    if (cap < 7 || m->clarity > 100) return 0;
+    put_u32(buf, m->freq_mhz);
+    put_u16(buf + 4, (uint16_t)m->level_cdb);
+    buf[6] = m->clarity;
+    return 7;
+}
+
+bool slp_tuner_unpack(const uint8_t *p, size_t len, slp_tuner_t *m) {
+    if (len != 7 || p[6] > 100) return false;
+    m->freq_mhz = get_u32(p);
+    m->level_cdb = (int16_t)get_u16(p + 4);
+    m->clarity = p[6];
+    return true;
+}
+
 #define MODEL_BEGIN_LEN (11 + SLP_MODEL_NAME_LEN)
 
 size_t slp_model_begin_pack(const slp_model_begin_t *m, uint8_t *buf, size_t cap) {

@@ -24,14 +24,14 @@ work="$root/build/seed3-link"
 boot=1
 [[ "${1:-}" == "--internal" ]] && boot=0
 
-# Rocco's commit the patch is made for, and the toolchain release it was tested with.
-seed_commit=1636ef6fc16e1d956022485711790b667f108dc3
+# Rocco's commit the patch is made for (2026-11-16: five amps incl. the Randall, per-amp trims and cabinet), and the toolchain release it was tested with.
+seed_commit=021e2853504b8390e63cc95f3dc1e6e15962f6d4
 arm_release=15.3.rel2
 # SHA-256 of the binaries this script produces for that commit, as run on a real Seed (see
-# README.md). Empty: not run yet. The bootloader build with all six effects (2026-10-20) hasn't been;
-# the last one run on a Seed was 7ac13d5d... (delay and reverb only, 2026-10-19: DSP load measured,
-# all amps load). The internal-flash build no longer fits.
+# README.md): the bootloader build with all six effects, 2026-10-20 (DSP load of every effect
+# measured on the borrowed Seed; not listened to yet). The internal-flash build no longer fits.
 tested_sha256=
+# The last one run on a Seed was f1f60277... (Rocco's 1636ef6, four amps). Not run yet on 021e285.
 tested_boot_sha256=
 
 mkdir -p "$work"
@@ -72,7 +72,7 @@ git -C "$seed" reset -q --hard
 git -C "$seed" clean -q -fdx -e libs/ -e models/local/ -e build/ -e build-boot/
 git -C "$seed" checkout -q --detach "$seed_commit"
 
-# 3. libDaisy at the commit Rocco's install script pins, and the three amp models.
+# 3. libDaisy at the commit Rocco's install script pins, and the amp models.
 daisy_commit=$(sed -n 's/^daisy_commit=//p' "$seed/scripts/install.sh")
 if [[ ! -d "$seed/libs/libDaisy/.git" ]]; then
     git clone -q --no-checkout https://github.com/electro-smith/libDaisy.git "$seed/libs/libDaisy"

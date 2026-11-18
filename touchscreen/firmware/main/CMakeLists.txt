@@ -10,6 +10,8 @@ idf_component_register(
         "rig/rig_state.c"
         "rig/amp_models.c"
         "knobs/knobs.c"
+        "knobs/qt_encoder.c"
+        "knobs/amp_encoder.c"
         "sd/sd_storage.c"
         "nam/nam_a2.c"
         "nam/nam_store.c"
@@ -20,6 +22,8 @@ idf_component_register(
         "ui/ui_ir_curve.c"
         "ui/ui_vertical_slider.c"
         "ui/ui_test_mode.c"
+        "ui/ui_tuner.c"
+        "ui/tuner_note.c"
     INCLUDE_DIRS
         "."
         "ui"

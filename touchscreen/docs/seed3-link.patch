@@ -1,5 +1,5 @@
 diff --git a/make/firmware.mk b/make/firmware.mk
-index c49c817..0861108 100644
+index 45eb3c5..44944f9 100644
 --- a/make/firmware.mk
 +++ b/make/firmware.mk
 @@ -1,5 +1,6 @@
@@ -10,15 +10,8 @@ index c49c817..0861108 100644
  C_INCLUDES = -Isrc -Ibuild/generated
  CPP_STANDARD = -std=gnu++20
  # Optimize application and model code for speed; libDaisy builds with -Os.
-@@ -40,3 +41,6 @@ compile-objects: $(OBJECTS)
- $(OBJECTS): make/firmware.mk
- $(BUILD_DIR)/amp_models.o: $(A2_HEADER)
- $(BUILD_DIR)/$(TARGET).elf: make/firmware.mk $(LIBDAISY_DIR)/build/libdaisy.a
-+
-+# Effects: small code over speed (a few us per block either way).
-+$(BUILD_DIR)/effects.o: CPPFLAGS += -Os
 diff --git a/src/audio/nam_audio.cpp b/src/audio/nam_audio.cpp
-index 490458d..5a06c17 100644
+index d5772c4..a73baae 100644
 --- a/src/audio/nam_audio.cpp
 +++ b/src/audio/nam_audio.cpp
 @@ -1,4 +1,5 @@
@@ -27,7 +20,7 @@ index 490458d..5a06c17 100644
  #include <algorithm>
  #include <cmath>
  
-@@ -31,6 +32,21 @@ bool NamAudio::LoadAmpModel(AmpId amp) {
+@@ -38,6 +39,24 @@ bool NamAudio::LoadAmpModel(AmpId amp) {
      return ready_;
  }
  
@@ -35,8 +28,11 @@ index 490458d..5a06c17 100644
 +    ready_ = false;
 +
 +    // Same steps as LoadAmpModel, with the model built on the uploaded weights.
++    // An uploaded capture is assumed amp-only: cabinet EQ on, no trims.
 +    cabinet_.Reset();
-+    amp_includes_cabinet_ = false;
++    cabinet_enabled_ = true;
++    input_gain_ = 1.0f;
++    output_gain_ = 1.0f;
 +    processor_.ClearModel();
 +    try {
 +        ready_ = processor_.SetModel(std::make_unique<A2Lite>(weights), kSampleRate, kBlockSize);
@@ -50,10 +46,10 @@ index 490458d..5a06c17 100644
      cabinet_enabled_ = enabled;
      cabinet_.Reset();
 diff --git a/src/audio/nam_audio.h b/src/audio/nam_audio.h
-index 5f4657e..63770e8 100644
+index 54bf274..55950d8 100644
 --- a/src/audio/nam_audio.h
 +++ b/src/audio/nam_audio.h
-@@ -18,6 +18,10 @@ class NamAudio {
+@@ -17,6 +17,10 @@ class NamAudio {
  
      // Call with audio stopped. Failure leaves the path in bypass.
      bool LoadAmpModel(AmpId amp = AmpId::Fender);
@@ -63,12 +59,12 @@ index 5f4657e..63770e8 100644
 +    bool LoadUploadedModel(const float *weights);
  
      // Call with audio stopped. Turns the cabinet EQ after the model on or off
-     // (it starts on) and clears its memory either way. The setting survives
+     // and clears its memory either way. Each LoadAmpModel resets it to the
 diff --git a/src/main.cpp b/src/main.cpp
-index 73d229c..f02a03d 100644
+index 919d365..8e8f5a9 100644
 --- a/src/main.cpp
 +++ b/src/main.cpp
-@@ -1,8 +1,14 @@
+@@ -1,9 +1,15 @@
  #include "audio/nam_audio.h"
  #include "daisy_seed.h"
 +#include "fx/effects.h"
@@ -79,12 +75,13 @@ index 73d229c..f02a03d 100644
 +#include <cmath>
  #include <cstdint>
 +#include <cstdio>
+ #include <cstdlib>
 +#include <cstring>
+ #include <new>
  
  daisy::DaisySeed seed;
- static NamAudio audio;
-@@ -14,6 +20,48 @@ static std::atomic<uint32_t> requested_amp{1};
- static std::atomic<bool> requested_cabinet{true};
+@@ -16,6 +22,48 @@ static std::atomic<uint32_t> requested_amp{1};
+ static std::atomic<bool> cabinet_toggle_requested{false};
  static std::atomic<bool> bootloader_requested{false};
  static_assert(ATOMIC_INT_LOCK_FREE == 2, "Audio counters must be lock-free");
 +
@@ -131,8 +128,8 @@ index 73d229c..f02a03d 100644
 +static constexpr uint32_t kUploadedCommand = 255;
  // Only changed while audio is stopped.
  static bool bypass = false;
- // ADC channels for the carrier board's pots: volume (RV2) on Daisy pin 22
-@@ -36,6 +84,13 @@ static void RecordCallbackTiming(uint32_t elapsed_us) {
+ 
+@@ -58,6 +106,13 @@ static void RecordCallbackTiming(uint32_t elapsed_us) {
      audio_callbacks.fetch_add(1, std::memory_order_relaxed);
  }
  
@@ -146,7 +143,7 @@ index 73d229c..f02a03d 100644
  void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioHandle::OutputBuffer output_channels, size_t frame_count) {
      // Measure in raw timer ticks: GetUs() wraps every ~17.9 s (2^32 ticks at
      // 240 MHz), so subtracting two GetUs() values across the wrap yields
-@@ -45,8 +100,33 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
+@@ -68,8 +123,33 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
      // Pass on the latest knob readings, which the ADC's DMA keeps current.
      audio.SetKnobs(seed.adc.GetFloat(kVolumeKnob), seed.adc.GetFloat(kToneKnob));
  
@@ -181,18 +178,18 @@ index 73d229c..f02a03d 100644
 +    RaisePeak(out_peak, out_max);
  
      // Record how long the block took.
-     const uint32_t elapsed_ticks = daisy::System::GetTick() - start_tick;
-@@ -57,7 +137,7 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
+     in_audio_callback.store(false, std::memory_order_relaxed);
+@@ -81,7 +161,7 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
  // here.
  void OnUsbReceive(uint8_t *data, uint32_t *byte_count) {
-     // '0'-'4' select bypass or an amp; 'C' toggles the cabinet; 'B' asks for
+     // '0'-'5' select bypass or an amp; 'C' toggles the cabinet; 'B' asks for
 -    // the DFU bootloader.
 +    // the DFU bootloader; effect keys (see ApplyFxKey) toggle an effect.
      for (uint32_t i = 0; i < *byte_count; ++i) {
-         if (data[i] >= '0' && data[i] <= '4')
+         if (data[i] >= '0' && data[i] <= '5')
              requested_amp.store(data[i] - '0', std::memory_order_relaxed);
-@@ -65,6 +145,12 @@ void OnUsbReceive(uint8_t *data, uint32_t *byte_count) {
-             requested_cabinet.store(!requested_cabinet.load(std::memory_order_relaxed), std::memory_order_relaxed);
+@@ -89,6 +169,12 @@ void OnUsbReceive(uint8_t *data, uint32_t *byte_count) {
+             cabinet_toggle_requested.store(true, std::memory_order_relaxed);
          else if (data[i] == 'B')
              bootloader_requested.store(true, std::memory_order_relaxed);
 +        else if (data[i] == 'U') {
@@ -204,7 +201,7 @@ index 73d229c..f02a03d 100644
      }
  }
  
-@@ -79,18 +165,34 @@ static void EnterBootloaderIfRequested() {
+@@ -103,18 +189,34 @@ static void EnterBootloaderIfRequested() {
      seed.StopAudio();
      seed.PrintLine(">>> rebooting into DFU bootloader");
      seed.DelayMs(50); // Let the USB transfer finish before the reset.
@@ -239,16 +236,16 @@ index 73d229c..f02a03d 100644
  #ifdef A2_LITE_PROFILE
      uint32_t profile_blocks = 0;
      uint32_t input_mark = 0;
-@@ -140,7 +242,7 @@ static void ReportProfile(AppState &state) {
+@@ -164,7 +266,7 @@ static void ReportProfile(AppState &state) {
  }
  #endif
  
--static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton C=cab B=DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
-+static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton C=cab G=gate K=comp O=drive M=fuzz H=chorus D=delay R=hall S=spring B=DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
+-static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab B=DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
++static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab G=gate K=comp O=drive M=fuzz H=chorus D=delay R=hall S=spring B=DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
  
  static void InitHardware() {
      seed.Init(true); // 480 MHz boost; the model needs the headroom.
-@@ -182,6 +284,7 @@ static void ApplyPendingAmpCommand(AppState &state) {
+@@ -206,6 +308,7 @@ static void ApplyPendingAmpCommand(AppState &state) {
      if (!bypass) {
          state.selected_amp = static_cast<AmpId>(command);
          state.model_ready = audio.LoadAmpModel(state.selected_amp);
@@ -256,7 +253,7 @@ index 73d229c..f02a03d 100644
      }
      state.current_command = command;
  
-@@ -193,6 +296,31 @@ static void ApplyPendingAmpCommand(AppState &state) {
+@@ -217,6 +320,31 @@ static void ApplyPendingAmpCommand(AppState &state) {
          seed.PrintLine(">>> %s %s", AmpName(state.selected_amp), state.model_ready ? "loaded" : "FAILED to load");
  }
  
@@ -286,9 +283,9 @@ index 73d229c..f02a03d 100644
 +}
 +
  static void ApplyPendingCabinetCommand() {
-     // Do nothing unless the USB handler has toggled the cabinet.
-     const bool enabled = requested_cabinet.load(std::memory_order_relaxed);
-@@ -255,13 +383,16 @@ static void ReportStatus(AppState &state) {
+     // Do nothing unless the USB handler has asked for a toggle. The request
+     // is a flag rather than a target state because each amp load resets the
+@@ -281,12 +409,15 @@ static void ReportStatus(AppState &state) {
      const uint32_t avg_pct = avg_us * 100 / kBlockBudgetUs;
      const uint32_t peak_pct = max_us * 100 / kBlockBudgetUs;
      const int32_t headroom_us = static_cast<int32_t>(kBlockBudgetUs) - static_cast<int32_t>(max_us);
@@ -299,14 +296,13 @@ index 73d229c..f02a03d 100644
  
      // Print the status line.
      const char *mode = bypass ? "bypass" : (state.model_ready ? "active" : "failed");
-     // "amp" means the capture includes its own cabinet, so the EQ is skipped.
-     const char *cabinet = !active ? "-" : !audio.CabinetApplies() ? "amp" : audio.CabinetEnabled() ? "on" : "off";
+     const char *cabinet = !active ? "-" : audio.CabinetEnabled() ? "on" : "off";
 -    seed.PrintLine("[%-6s %-22s]  cab %-3s  avg %3lu%% (%4lu us)  peak %3lu%% (%4lu us)  headroom %5ld us  blocks %4lu  overruns %lu%s", mode, active ? AmpName(state.selected_amp) : "-", cabinet, static_cast<unsigned long>(avg_pct), static_cast<unsigned long>(avg_us), static_cast<unsigned long>(peak_pct), static_cast<unsigned long>(max_us), static_cast<long>(headroom_us), static_cast<unsigned long>(callbacks), static_cast<unsigned long>(overrun_count), overrun_count ? "  <-- OVERRUN" : "");
 +    seed.PrintLine("[%-6s %-22s]  cab %-3s  avg %3lu%% (%4lu us)  peak %3lu%% (%4lu us)  headroom %5ld us  blocks %4lu  overruns %lu%s", mode, active ? (state.uploaded ? "SD profile" : AmpName(state.selected_amp)) : "-", cabinet, static_cast<unsigned long>(avg_pct), static_cast<unsigned long>(avg_us), static_cast<unsigned long>(peak_pct), static_cast<unsigned long>(max_us), static_cast<long>(headroom_us), static_cast<unsigned long>(callbacks), static_cast<unsigned long>(overrun_count), overrun_count ? "  <-- OVERRUN" : "");
      ReportKnobs(state);
- #ifdef A2_LITE_PROFILE
-     state.profile_blocks += callbacks;
-@@ -270,8 +401,206 @@ static void ReportStatus(AppState &state) {
+ 
+     // An allocation in the callback is a bug; hwtest fails a run that shows one.
+@@ -299,8 +430,206 @@ static void ReportStatus(AppState &state) {
  #endif
  }
  
@@ -377,8 +373,8 @@ index 73d229c..f02a03d 100644
 +}
 +
 +static void OnFx(void *, uint8_t fx, bool on, uint8_t model) {
-+    if (fx == SLP_FX_CAB)
-+        requested_cabinet.store(on, std::memory_order_relaxed);
++    // The cabinet EQ keeps each amp's default (see NamAudio::LoadAmpModel): the touchscreen
++    // always reports CAB on, which would put the EQ on captures that include their own speaker.
 +    rig.SetFx(fx, on, model); // ignores the effects it doesn't run
 +}
 +
@@ -513,7 +509,7 @@ index 73d229c..f02a03d 100644
  
      // Load the default amp, start from where the knobs are, and start audio.
      AppState state;
-@@ -285,8 +614,12 @@ int main() {
+@@ -314,8 +643,12 @@ int main() {
      while (true) {
          EnterBootloaderIfRequested();
          ApplyPendingAmpCommand(state);

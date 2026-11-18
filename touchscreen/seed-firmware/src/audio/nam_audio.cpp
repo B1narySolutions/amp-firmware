@@ -1,4 +1,7 @@
 #include "audio/nam_audio.h"
+#ifdef SEED_LINK
+#include "models/a2_lite.h"
+#endif
 #include <algorithm>
 #include <cmath>
 
@@ -37,6 +40,26 @@ bool NamAudio::LoadAmpModel(AmpId amp) {
     }
     return ready_;
 }
+
+#ifdef SEED_LINK
+bool NamAudio::LoadUploadedModel(const float *weights) {
+    ready_ = false;
+
+    // Same steps as LoadAmpModel, with the model built on the uploaded weights.
+    cabinet_.Reset();
+    cabinet_enabled_ = true;
+    input_gain_ = 1.0f;
+    output_gain_ = 1.0f;
+    processor_.ClearModel();
+    try {
+        // check-patterns: allow heap: models are built on the load path, with audio stopped.
+        ready_ = processor_.SetModel(std::make_unique<A2Lite>(weights), kSampleRate, kBlockSize);
+    } catch (...) {
+        // Allocation/construction failure must not prevent audio startup.
+    }
+    return ready_;
+}
+#endif
 
 void NamAudio::SetCabinet(bool enabled) {
     cabinet_enabled_ = enabled;

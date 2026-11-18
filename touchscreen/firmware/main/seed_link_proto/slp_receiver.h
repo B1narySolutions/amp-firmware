@@ -48,6 +48,11 @@ typedef struct {
     // then uploads it again). Load models with audio stopped.
     void (*on_select_model)(void *ctx, const slp_select_model_t *m, const uint8_t *weights);
     void (*on_link)(void *ctx, bool up);                          // the ESP32 appeared / went silent
+#ifdef SLP_RX_TUNER
+    // The tuner page opened, closed, or repeated its state (each second while open). Built only
+    // with SLP_RX_TUNER, so a Seed without a tuner keeps the receiver it had.
+    void (*on_tuner)(void *ctx, bool on, bool mute);
+#endif
 } slp_rx_config_t;
 
 typedef struct {
@@ -76,6 +81,8 @@ void slp_rx_poll(slp_receiver_t *r);
 // applied_snapshot_id is filled in from the receiver's own record.
 void slp_rx_send_status(slp_receiver_t *r, const slp_status_t *st);
 void slp_rx_send_meters(slp_receiver_t *r, const slp_meters_t *m);
+// About 20 times a second while the tuner is on.
+void slp_rx_send_tuner(slp_receiver_t *r, const slp_tuner_t *m);
 void slp_rx_send_log(slp_receiver_t *r, const char *text);
 bool slp_rx_link_up(const slp_receiver_t *r);
 

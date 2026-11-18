@@ -23,6 +23,8 @@ static const ui_model_def_t m_amp[] = {
     { "Fender Twin65",      "Fender Twin Reverb '65 reissue, clean headroom. NAM A2 capture.", { 50, 50, 50, 50, 0 } },
     { "Vox AC30 Chimey",    "Vox AC30 Custom Classic, chimey top-boost breakup. NAM A2 capture.", { 50, 50, 50, 50, 50 } },
     { "Marshall JCM800 G5", "Marshall JCM800 2203, classic rock crunch to lead. NAM A2 capture.", { 50, 50, 50, 50, 50 } },
+    { "Fender Princeton65 EOB", "Fender '65 Princeton, edge of breakup, SM57. NAM A2 capture.", { 50, 50, 50, 50, 50 } },
+    { "Randall Satan 50",   "Randall Satan 50, modern high gain, mic'd. NAM A2 capture.", { 50, 50, 50, 50, 50 } },
 };
 static const ui_model_def_t m_drive[] = {
     { "Tube Screamer",  "Mid-forward overdrive with a smooth, compressed clip.", { 45, 60, 60 } },

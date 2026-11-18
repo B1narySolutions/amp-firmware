@@ -39,6 +39,8 @@ CONFIG_LV_FONT_MONTSERRAT_12=y
 CONFIG_LV_FONT_MONTSERRAT_14=y
 CONFIG_LV_FONT_MONTSERRAT_16=y
 CONFIG_LV_FONT_MONTSERRAT_24=y
+# The tuner's note (ui_tuner.c), drawn at 2x.
+CONFIG_LV_FONT_MONTSERRAT_48=y
 
 # Per-core CPU load in Test Mode / the DIAG line (idle-task run time, 1 us esp_timer clock).
 CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y

@@ -111,9 +111,9 @@ template <int Pairs> class HalfBand2x {
 // mid hump), 1 Big Muff (two cascaded clipping stages; tone blends a low-pass and a high-pass, which
 // scoops the mids), 2 Klon-style (soft clipping blended with more clean signal the lower the gain;
 // treble tone), 3 Rat (up to 66 dB of gain whose bandwidth shrinks with gain, as the LM308's does,
-// into hard diode clipping; filter tone). Against aliasing, the clipping runs at 192 kHz (two
-// HalfBand2x stages) through an antiderivative anti-aliased clipper; the pedal adds about 27.5
-// samples (0.57 ms) of delay while it's on.
+// into hard diode clipping; filter tone). Against aliasing, the clipping runs through an
+// antiderivative anti-aliased clipper at 96 kHz (Tube Screamer, Klon: the pedal adds 23 samples,
+// 0.48 ms, of delay while it's on) or 192 kHz (Big Muff, Rat: 27.5 samples, 0.57 ms).
 class Drive {
   public:
     enum Model : uint8_t { kScreamer = 0, kMuff = 1, kKlon = 2, kRat = 3 };
@@ -131,7 +131,7 @@ class Drive {
     Settings settings_;
     HalfBand2x<12> outer_; // 48 <-> 96 kHz
     HalfBand2x<5> inner_;  // 96 <-> 192 kHz
-    bool on_ = false;
+    bool on_ = false, x4_ = false;
     uint8_t model_ = 0;
     float fade_ = 0;
     float gain_ = 0, gain2_ = 0, clean_ = 0, clip_ = 0, level_ = 0;

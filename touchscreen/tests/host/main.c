@@ -14,6 +14,7 @@ int main(void) {
         { "coalesce", test_coalesce },
         { "nam (A2 loader, golden)", test_nam },
         { "receiver (Seed side)", test_receiver },
+        { "tuner page arithmetic", test_tuner_note },
     };
     for (size_t i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) {
         const int before = g_failures;

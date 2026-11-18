@@ -590,12 +590,13 @@ float Drive::GainDb(uint8_t model, int16_t knob) {
 
 void Drive::Apply(bool on, uint8_t model, const int16_t k[kMaxKnobs]) {
     on_ = on;
-    model_ = model <= kRat ? model : kScreamer;
+    model_ = model <= kRat ? model : static_cast<uint8_t>(kScreamer);
     gain_ = DbToLin(GainDb(model_, k[0]));
     level_ = DbToLin(-30.0f + 40.0f * Knob(k[2]));
     const float tone = Knob(k[1]);
     gain2_ = 1.0f;
     clean_ = 0.0f;
+    x4_ = model_ == kMuff || model_ == kRat; // the high-gain ones need 192 kHz
     switch (model_) {
     case kScreamer:
         in_hp_a_ = OnePoleA2x(720.0f); // only the mids and up get clipped: the TS hump
@@ -651,6 +652,11 @@ inline float ClipIntegral(float x) {
 float Drive::Clip(float x, float &prev) {
     const float x0 = prev;
     prev = x;
+    // Both on the curved part (the usual case): (F(x) - F(x0)) / (x - x0) worked out, no division.
+    if (x < 1.5f && x > -1.5f && x0 < 1.5f && x0 > -1.5f) {
+        const float s = x + x0;
+        return 0.5f * s - s * (x * x + x0 * x0) * (1.0f / 27.0f);
+    }
     // Both on the same flat part: exactly +-1 (and no cancellation in the difference below).
     if ((x >= 1.5f && x0 >= 1.5f) || (x <= -1.5f && x0 <= -1.5f))
         return x > 0 ? 1.0f : -1.0f;
@@ -676,10 +682,12 @@ float Drive::Shape(float s) {
 }
 
 float Drive::Stage(float r) {
+    in_hp_z_ += (1.0f - in_hp_a_) * (r - in_hp_z_);
+    if (!x4_) // Tube Screamer, Klon: clipped at 96 kHz (measured clean enough: below -97 dB)
+        return clip_ * Shape(r - in_hp_z_) + clean_ * r;
     clean_hist_[clean_pos_] = r;
     const float clean = clean_hist_[(clean_pos_ + 16 - HalfBand2x<5>::kLatency) & 15];
     clean_pos_ = (clean_pos_ + 1) & 15;
-    in_hp_z_ += (1.0f - in_hp_a_) * (r - in_hp_z_);
     float a, b;
     inner_.Up(r - in_hp_z_, a, b);
     a = Shape(a);
@@ -750,7 +758,7 @@ void Chorus::Init(float *mem) {
 
 void Chorus::Apply(bool on, uint8_t model, const int16_t k[kMaxKnobs]) {
     on_ = on;
-    model_ = model <= kEnsemble ? model : kClassic;
+    model_ = model <= kEnsemble ? model : static_cast<uint8_t>(kClassic);
     base_ = kChorusShapes[model_].base_ms * (kSampleRate / 1000.0f);
     depth_ = DepthMs(model_, k[1]) * (kSampleRate / 1000.0f);
     rate_ = RateHz(model_, k[0]) / kSampleRate;
@@ -789,32 +797,47 @@ void Chorus::Process(float *x, std::size_t n) {
         Apply(on, model, k);
     if (!on_ && fade_ <= 0)
         return;
-    const float dry_step = (dry_ - dry_now_) / n, wet_step = (wet_ - wet_now_) / n, depth_step = (depth_ - depth_now_) / n;
+    // The voices' delays at the start and the end of the block; in between they move in a straight
+    // line (the LFOs are under 7 Hz, so over 1 ms that's within 0.001 ms of the curve).
+    const float span = rate_ * static_cast<float>(n), span2 = 6.5f / kSampleRate * static_cast<float>(n);
+    const int voices = model_ == kClassic ? 1 : model_ == kDimension ? 2 : 3;
+    float d0[3], d1[3];
+    for (int e = 0; e < 2; ++e) {
+        float p = phase_ + (e ? span : 0.0f), q = phase2_ + (e ? span2 : 0.0f);
+        const float depth = e ? depth_ : depth_now_;
+        float *d = e ? d1 : d0;
+        for (int v = 0; v < voices; ++v) {
+            float pv = p + (model_ == kEnsemble ? v * (1.0f / 3.0f) : 0.0f), qv = q + v * (1.0f / 3.0f);
+            pv -= Floor(pv);
+            qv -= Floor(qv);
+            if (model_ == kDimension) {
+                const float tri = 4.0f * Abs(pv - 0.5f) - 1.0f; // -1 .. 1, the two voices opposite
+                d[v] = base_ + (v ? -depth : depth) * tri;
+            } else if (model_ == kEnsemble) {
+                d[v] = base_ + depth * (Sin2Pi(pv) + 0.05f * Sin2Pi(qv));
+            } else {
+                d[v] = base_ + depth * Sin2Pi(pv);
+            }
+        }
+    }
+    phase_ += span;
+    phase_ -= Floor(phase_);
+    phase2_ += span2;
+    phase2_ -= Floor(phase2_);
+    const float inv_n = 1.0f / static_cast<float>(n);
+    float step[3];
+    for (int v = 0; v < voices; ++v)
+        step[v] = (d1[v] - d0[v]) * inv_n;
+
+    const float dry_step = (dry_ - dry_now_) * inv_n, wet_step = (wet_ - wet_now_) * inv_n;
     for (std::size_t i = 0; i < n; ++i) {
         buf_[w_] = x[i];
         dry_now_ += dry_step;
         wet_now_ += wet_step;
-        depth_now_ += depth_step;
-        phase_ += rate_;
-        if (phase_ >= 1.0f)
-            phase_ -= 1.0f;
-        float wet;
-        if (model_ == kDimension) {
-            const float tri = 4.0f * Abs(phase_ - 0.5f) - 1.0f; // -1 .. 1
-            wet = Read(base_ + depth_now_ * tri) + Read(base_ - depth_now_ * tri);
-        } else if (model_ == kEnsemble) {
-            phase2_ += 6.5f / kSampleRate;
-            if (phase2_ >= 1.0f)
-                phase2_ -= 1.0f;
-            wet = 0;
-            for (int v = 0; v < 3; ++v) {
-                float p = phase_ + v * (1.0f / 3.0f), q = phase2_ + v * (1.0f / 3.0f);
-                p -= p >= 1.0f ? 1.0f : 0.0f;
-                q -= q >= 1.0f ? 1.0f : 0.0f;
-                wet += Read(base_ + depth_now_ * (Sin2Pi(p) + 0.05f * Sin2Pi(q)));
-            }
-        } else {
-            wet = Read(base_ + depth_now_ * Sin2Pi(phase_));
+        float wet = 0;
+        for (int v = 0; v < voices; ++v) {
+            d0[v] += step[v];
+            wet += Read(d0[v]);
         }
         w_ = (w_ + 1) & kChorusMask;
         FadeTowards(fade_, on_);

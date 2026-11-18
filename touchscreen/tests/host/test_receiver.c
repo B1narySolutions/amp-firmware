@@ -45,6 +45,9 @@ static void on_select(void *c, const slp_select_model_t *m, const uint8_t *w) {
     s_select_calls++;
 }
 static void on_link(void *c, bool up) { (void)c; s_link = up; }
+static int s_tuner_calls;
+static bool s_tuner_on, s_tuner_mute;
+static void on_tuner(void *c, bool on, bool mute) { (void)c; s_tuner_on = on; s_tuner_mute = mute; s_tuner_calls++; }
 
 static int count_out(uint8_t type) { return s_type_count[type]; }
 static const slp_frame_t *last_out(uint8_t type) {
@@ -72,7 +75,7 @@ void test_receiver(void) {
         .send = out, .now_ms = now_ms, .boot_id = 0x5EED0001, .fw_version = "test", .sample_rate_hz = 48000,
         .block_size = 48, .builtins = builtins, .builtin_count = 3, .model_buf = model_buf,
         .model_buf_size = sizeof(model_buf), .on_param = on_param, .on_fx = on_fx, .on_chain = on_chain,
-        .on_master = on_master, .on_select_model = on_select, .on_link = on_link,
+        .on_master = on_master, .on_select_model = on_select, .on_link = on_link, .on_tuner = on_tuner,
     };
     static slp_receiver_t r; // ~1 KB of decoder buffers: not on the stack
     slp_decoder_init(&s_out_dec);
@@ -210,7 +213,25 @@ void test_receiver(void) {
     esp_frame(&r, SLP_HEARTBEAT, p, slp_heartbeat_pack(&hb, p, sizeof(p)), 0);
     CHECK(s_link);
 
-    // 7. Noise never crashes it.
+    // 7. The tuner: SET_TUNER reaches its hook, isn't counted as a snapshot's state frame, and a
+    //    bad one is ignored; TUNER goes out as packed.
+    slp_set_tuner_t stn = { 1, 1 };
+    esp_frame(&r, SLP_SET_TUNER, p, slp_set_tuner_pack(&stn, p, sizeof(p)), 0);
+    CHECK(s_tuner_calls == 1 && s_tuner_on && s_tuner_mute);
+    const uint8_t bad_tuner[2] = { 1, 9 };
+    esp_frame(&r, SLP_SET_TUNER, bad_tuner, sizeof(bad_tuner), 0);
+    CHECK_EQ(s_tuner_calls, 1);
+    stn.on = 0;
+    stn.mute = 0;
+    esp_frame(&r, SLP_SET_TUNER, p, slp_set_tuner_pack(&stn, p, sizeof(p)), 0);
+    CHECK(s_tuner_calls == 2 && !s_tuner_on && !s_tuner_mute);
+    const slp_tuner_t tn = { 110000, -1800, 95 };
+    slp_rx_send_tuner(&r, &tn);
+    slp_tuner_t tn_out;
+    CHECK(slp_tuner_unpack(last_out(SLP_TUNER)->payload, last_out(SLP_TUNER)->len, &tn_out) && tn_out.freq_mhz == 110000 &&
+          tn_out.level_cdb == -1800 && tn_out.clarity == 95);
+
+    // 8. Noise never crashes it.
     uint8_t junk[4096];
     for (size_t i = 0; i < sizeof(junk); i++) junk[i] = (uint8_t)(test_rand(&seed) % 8 == 0 ? 0 : test_rand(&seed));
     slp_rx_feed(&r, junk, sizeof(junk));

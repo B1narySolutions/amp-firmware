@@ -108,6 +108,14 @@ static void handle(slp_receiver_t *r, const slp_frame_t *f) {
         if (r->cfg.on_select_model) r->cfg.on_select_model(ctx, &m, have ? r->cfg.model_buf : NULL);
         return;
     }
+#ifdef SLP_RX_TUNER
+    case SLP_SET_TUNER: { // not state: no state_frame(), it isn't part of snapshots
+        slp_set_tuner_t m;
+        if (!slp_set_tuner_unpack(f->payload, f->len, &m)) return;
+        if (r->cfg.on_tuner) r->cfg.on_tuner(ctx, m.on != 0, m.mute != 0);
+        return;
+    }
+#endif
     case SLP_SNAPSHOT_BEGIN: {
         slp_snapshot_t s;
         if (!slp_snapshot_unpack(f->payload, f->len, &s)) return;
@@ -215,6 +223,11 @@ void slp_rx_send_status(slp_receiver_t *r, const slp_status_t *st) {
 void slp_rx_send_meters(slp_receiver_t *r, const slp_meters_t *m) {
     uint8_t p[8];
     send(r, SLP_METERS, p, slp_meters_pack(m, p, sizeof(p)));
+}
+
+void slp_rx_send_tuner(slp_receiver_t *r, const slp_tuner_t *m) {
+    uint8_t p[8];
+    send(r, SLP_TUNER, p, slp_tuner_pack(m, p, sizeof(p)));
 }
 
 void slp_rx_send_log(slp_receiver_t *r, const char *text) {

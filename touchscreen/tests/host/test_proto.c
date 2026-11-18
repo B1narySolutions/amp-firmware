@@ -249,6 +249,23 @@ static void test_messages(void) {
     slp_meters_t me = { -600, SLP_METER_SILENCE, 17 };
     ROUND_TRIP(meters, me, b->in_peak_cdb == -600 && b->out_peak_cdb == SLP_METER_SILENCE && b->clip_count == 17);
 
+    slp_set_tuner_t stn = { 1, 1 };
+    ROUND_TRIP(set_tuner, stn, b->on == 1 && b->mute == 1);
+    stn.mute = 2;
+    CHECK_EQ(slp_set_tuner_pack(&stn, buf, sizeof(buf)), 0);
+    {
+        const uint8_t bad[2] = { 1, 7 };
+        slp_set_tuner_t out;
+        CHECK(!slp_set_tuner_unpack(bad, 2, &out));
+    }
+
+    slp_tuner_t tn = { 82407, -2350, 97 }; // the low E at -23.5 dBFS
+    ROUND_TRIP(tuner, tn, b->freq_mhz == 82407 && b->level_cdb == -2350 && b->clarity == 97);
+    slp_tuner_t tn0 = { 0, SLP_METER_SILENCE, 0 };
+    ROUND_TRIP(tuner, tn0, b->freq_mhz == 0 && b->level_cdb == SLP_METER_SILENCE && b->clarity == 0);
+    tn.clarity = 101;
+    CHECK_EQ(slp_tuner_pack(&tn, buf, sizeof(buf)), 0);
+
     slp_model_begin_t mb = { 9, 1871, 7484, 0xCAFEBABE, "TONE3000 Plexi A2" };
     ROUND_TRIP(model_begin, mb, b->weight_count == 1871 && b->byte_count == 7484 && b->crc32 == 0xCAFEBABE &&
                strcmp(b->name, "TONE3000 Plexi A2") == 0);

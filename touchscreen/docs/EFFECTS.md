@@ -30,8 +30,8 @@ effects (EQ, octave, phaser, tremolo) don't run on the Seed.
   high-pass) and adds the clean signal back (the mid hump); Big Muff is two clipping stages and a tone
   control that blends a low-pass and a high-pass (the mid scoop); Klon-style blends more clean signal the
   lower the gain; Rat's gain bandwidth shrinks as the gain rises, as the LM308's does. The clipping runs
-  at 192 kHz through an anti-aliased (ADAA) cubic clipper, so even full fuzz stays clean of off-pitch
-  tones; while on, the drive adds 0.57 ms of delay.
+  through an anti-aliased (ADAA) cubic clipper at 96 kHz (Tube Screamer, Klon) or 192 kHz (Big Muff, Rat),
+  so even full fuzz stays clean of off-pitch tones; while on, the drive adds 0.48 to 0.57 ms of delay.
 - **Chorus:** Classic is one sine-modulated voice; Dimension two voices on opposite triangle LFOs
   (depth without an obvious wobble); Ensemble three voices 120 degrees apart plus a 6.5 Hz shimmer.
   Mono output: the "stereo" wording was taken out of the touchscreen's descriptions.
@@ -63,36 +63,41 @@ effects (EQ, octave, phaser, tremolo) don't run on the Seed.
   plays them from the touchscreen. The Fender capture compresses by itself at normal levels, so the
   compressor is clearest in front of a clean amp (VOLUME 0: loud-to-quiet range 15.3 dB -> 10.4 dB).
 
-## On the Seed
+## On the Seed (measured 2026-10-20, borrowed Seed3 under the Daisy bootloader, no guitar or headphones)
 
-Measured 2026-10-19 (borrowed Seed3, bare: no guitar or headphones), DSP time per 1 ms block, toggled with
-the Seed's console keys:
+DSP time per 1 ms block, each effect toggled with the Seed's console keys at the touchscreen's defaults:
 
 | On | Average | Peak | Overruns |
 |---|---|---|---|
-| nothing (amp + cab + link) | 573 us | 584 us | 0 |
-| delay | 587 us (+14) | 598 us | 0 |
-| hall reverb | 609 us (+36) | 619 us | 0 |
-| spring reverb | 641 us (+68) | 652 us | 0 |
-| delay + spring | 655 us | 666 us (67 %) | 0 |
+| nothing (amp + cab + link) | 572 us | 582 us | 0 |
+| gate | 581 us (+9) | 591 us | 0 |
+| compressor | 590 us (+18) | 600 us | 0 |
+| drive: Tube Screamer | 609 us (+37) | 621 us | 0 |
+| drive: Big Muff | 665 us (+93) | 675 us | 0 |
+| chorus: Ensemble | 600 us (+28) | 612 us | 0 |
+| delay (2026-10-19) | +14 | | 0 |
+| reverb: hall / spring (2026-10-19) | +36 / +68 | | 0 |
+| all six: gate, comp, Big Muff, Ensemble, delay, spring | 803 us | 815 us (81.5 %) | 0 |
+| all off again, 12 s later | 572 us | 583 us | 0 |
 
-Gate, comp, drive and chorus aren't measured on the Seed yet. On the Mac they cost 0.2 (gate), 0.4
-(comp), 6.3-7.3 (drive) and 0.7-1.9 (chorus) us a block; the Seed was 8 to 30 times slower than the Mac
-for delay and reverb, so roughly 60 us for the drive and 15 us for the Ensemble chorus: every effect on
-at once should stay around 75 % of the block.
+That's the most expensive choice of each (Big Muff, Ensemble, spring); a typical rig (Tube Screamer, chorus,
+delay, hall) is about 69 %.
 
+- **Getting there:** the first build cost 937 us with everything on. Compiling the effects for speed
+  instead of size (no longer needed under the bootloader), clipping the Tube Screamer and Klon at 96 kHz
+  instead of 192 (still below -97 dB of aliasing), working out the anti-aliased clipper without a division
+  on its curved part, and computing the chorus LFOs once per block brought it to 815 us.
 - **Memory:** delay 196 KB in the SDRAM; reverb 100 KB in the DTCM (from the SDRAM the hall cost 76 us a
   block, from the DTCM 36 us); chorus 8 KB in the AXI SRAM.
-- **Flash:** the effects are 9.1 KB compiled for size (no libm). With all six the build no longer fits the
-  128 KB internal flash (8.5 KB over), so `seed3-link-firmware/` now builds for the **Daisy bootloader**
-  by default: 199 KB of 480 KB used. See [seed3-link-firmware/README.md](../seed3-link-firmware/README.md).
+- **Flash:** with all six the build doesn't fit the 128 KB internal flash, so `seed3-link-firmware/` builds
+  for the **Daisy bootloader** by default: 210 KB of 480 KB used. No libm. See
+  [seed3-link-firmware/README.md](../seed3-link-firmware/README.md).
 - Seed console keys for bench tests: `G` gate, `K` comp, `O` Tube Screamer, `M` Big Muff, `H` Ensemble
   chorus, `D` delay, `R` hall, `S` spring.
 
 ## Next
 
-1. Run this build on the Seed: DSP load with every effect on, then listen with the carrier and the
-   touchscreen.
+1. Listen on the Seed: the carrier (guitar in, headphones out) with the touchscreen.
 2. Show the effects the Seed runs on the touchscreen's "Seed controls only" page.
 3. Decide what happens to EQ, octave, phaser and tremolo (not on the sponsor's list): build them or
    take them off the touchscreen.

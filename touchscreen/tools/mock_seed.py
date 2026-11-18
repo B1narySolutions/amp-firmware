@@ -12,6 +12,8 @@ What it does (docs/SEED_LINK_PROTOCOL.md):
   * Applies SET_PARAMS / SET_FX_STATE / SET_CHAIN / SET_MASTER / SELECT_MODEL and snapshots,
     and shows the resulting state in a live table.
   * Receives model uploads (MODEL_BEGIN/CHUNK/COMMIT), checks the CRC32, ACKs every chunk.
+  * Reports a tuner (STATUS flag HAS_TUNER) and answers SET_TUNER with SIMULATED TUNER readings:
+    each string of standard tuning brought up to pitch from 35 cents flat, in turn.
   * Fault injection: corrupt outgoing frames, drop received bytes, drop or delay ACKs, go silent,
     reboot with a new boot_id. Keys while running: r = reboot, c = corrupt next 20 frames,
     d = toggle dropping ACKs, s = silent for 5 s, q = quit.
@@ -64,7 +66,9 @@ class MockSeed:
         self.peer_heard = False
         self.last_rx = 0.0
         self.tx_frames = 0
-        self.next = dict(hello=0.0, heartbeat=0.0, status=0.0, meters=0.0)
+        self.next = dict(hello=0.0, heartbeat=0.0, status=0.0, meters=0.0, tuner=0.0)
+        # The tuner (SET_TUNER / TUNER): on while the touchscreen keeps asking, as on the Seed.
+        self.tuner_on, self.tuner_mute, self.tuner_heard, self.tuner_t0 = False, False, 0.0, 0.0
         # Audio state as the Seed would hold it; a reboot loses everything.
         self.params, self.fx, self.chain = {}, {}, []
         self.master, self.muted = None, None
@@ -166,6 +170,13 @@ class MockSeed:
             m = slp.unpack_set_master(f.payload)
             self.master, self.muted = m["volume"], m["muted"]
             self.log("set_master", **m)
+        elif t == slp.SET_TUNER:
+            m = slp.unpack_set_tuner(f.payload)
+            if m["on"] and not self.tuner_on:
+                self.tuner_t0 = time.monotonic()
+            if m["on"] != self.tuner_on:
+                self.log("set_tuner", **m)
+            self.tuner_on, self.tuner_mute, self.tuner_heard = m["on"], m["mute"], time.monotonic()
         elif t == slp.SELECT_MODEL:
             self.model = slp.unpack_select_model(f.payload)
             self.log("select_model", **self.model)
@@ -240,20 +251,39 @@ class MockSeed:
         if now >= self.next["meters"]:
             self.send(slp.METERS, self.meters_payload(now))
             self.next["meters"] = now + 1 / 30
+        if self.tuner_on and now - self.tuner_heard > 2.5:
+            self.tuner_on = self.tuner_mute = False  # the touchscreen stopped asking
+            self.log("tuner_timeout")
+        if self.tuner_on and now >= self.next["tuner"]:
+            self.send(slp.TUNER, self.tuner_payload(now))
+            self.next["tuner"] = now + 0.05
 
     def status_payload(self):
         m = self.model or dict(kind=slp.MODEL_BUILTIN, builtin_id=1, hash=0)
         failed = m["kind"] == slp.MODEL_UPLOADED and m["hash"] not in self.uploads
-        flags = slp.STATUS_AUDIO_RUNNING | (slp.STATUS_BYPASS if m["kind"] == slp.MODEL_BYPASS else 0) \
+        flags = slp.STATUS_AUDIO_RUNNING | slp.STATUS_HAS_TUNER | (slp.STATUS_BYPASS if m["kind"] == slp.MODEL_BYPASS else 0) \
             | (slp.STATUS_MODEL_FAILED if failed else 0)
         # SIMULATED load: A2-Lite measures about 55 % on the real Seed (docs/performance.md there).
         avg = 553 + self.rnd.randrange(-5, 6) if m["kind"] != slp.MODEL_BYPASS else 3
         return slp.pack_status(avg, avg + 9, 0, m["kind"], m["builtin_id"], m["hash"], flags, self.applied_snapshot)
 
+    def tuner_payload(self, now):
+        # SIMULATED tuning: each string of a guitar in standard tuning for 4 s, plucked 35 cents flat
+        # and brought up to pitch over 2.5 s, then 0.6 s of silence before the next string.
+        strings = (82.407, 110.0, 146.832, 195.998, 246.942, 329.628)
+        t = now - self.tuner_t0
+        k, phase = int(t // 4.6) % len(strings), t % 4.6
+        if phase > 4.0:
+            return slp.pack_tuner(0, slp.METER_SILENCE, 0)
+        cents = -35.0 * max(0.0, 1.0 - phase / 2.5) + self.rnd.uniform(-0.4, 0.4)
+        hz = strings[k] * 2 ** (cents / 1200)
+        level_db = -14 - 6 * phase  # the string decays
+        return slp.pack_tuner(int(hz * 1000 + 0.5), int(level_db * 100), 96)
+
     def meters_payload(self, now):
         # SIMULATED signal: a slow swell between -40 and -12 dBFS, output follows master volume.
         in_db = -26 + 14 * math.sin(now * 0.7)
-        if self.muted:
+        if self.muted or self.tuner_mute:
             out_cdb = slp.METER_SILENCE
         else:
             vol = self.master if self.master is not None else 63

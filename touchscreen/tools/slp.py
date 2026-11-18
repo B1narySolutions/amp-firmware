@@ -14,21 +14,21 @@ FLAG_ACK_REQ = 0x01
 
 HELLO, HEARTBEAT, PING, PONG, ACK, LOG = 0x01, 0x02, 0x03, 0x04, 0x05, 0x06
 SET_PARAMS, SET_FX_STATE, SET_CHAIN, SET_MASTER, SELECT_MODEL = 0x10, 0x11, 0x12, 0x13, 0x14
-SNAPSHOT_BEGIN, SNAPSHOT_END = 0x15, 0x16
-STATUS, METERS = 0x20, 0x21
+SNAPSHOT_BEGIN, SNAPSHOT_END, SET_TUNER = 0x15, 0x16, 0x17
+STATUS, METERS, TUNER = 0x20, 0x21, 0x22
 MODEL_BEGIN, MODEL_CHUNK, MODEL_COMMIT, MODEL_RESULT, MODEL_ABORT = 0x30, 0x31, 0x32, 0x33, 0x34
 
 TYPE_NAMES = {v: k for k, v in dict(
     HELLO=HELLO, HEARTBEAT=HEARTBEAT, PING=PING, PONG=PONG, ACK=ACK, LOG=LOG, SET_PARAMS=SET_PARAMS,
     SET_FX_STATE=SET_FX_STATE, SET_CHAIN=SET_CHAIN, SET_MASTER=SET_MASTER, SELECT_MODEL=SELECT_MODEL,
-    SNAPSHOT_BEGIN=SNAPSHOT_BEGIN, SNAPSHOT_END=SNAPSHOT_END, STATUS=STATUS, METERS=METERS,
+    SNAPSHOT_BEGIN=SNAPSHOT_BEGIN, SNAPSHOT_END=SNAPSHOT_END, SET_TUNER=SET_TUNER, STATUS=STATUS, METERS=METERS, TUNER=TUNER,
     MODEL_BEGIN=MODEL_BEGIN, MODEL_CHUNK=MODEL_CHUNK, MODEL_COMMIT=MODEL_COMMIT,
     MODEL_RESULT=MODEL_RESULT, MODEL_ABORT=MODEL_ABORT).items()}
 
 ROLE_UI, ROLE_SEED, ROLE_MOCK_SEED = 1, 2, 3
 OK, ERR_STATE, ERR_CRC, ERR_RANGE, ERR_NO_MEMORY, ERR_BUSY, ERR_REJECTED, ERR_TIMEOUT = range(8)
 MODEL_BUILTIN, MODEL_UPLOADED, MODEL_BYPASS = 1, 2, 3
-STATUS_BYPASS, STATUS_MODEL_FAILED, STATUS_AUDIO_RUNNING = 0x01, 0x02, 0x04
+STATUS_BYPASS, STATUS_MODEL_FAILED, STATUS_AUDIO_RUNNING, STATUS_HAS_TUNER = 0x01, 0x02, 0x04, 0x08
 SNAP_REASONS = {1: "hello", 2: "preset", 3: "boot", 4: "periodic", 5: "resync"}
 FX_NAMES = {1: "gate", 2: "comp", 3: "eq", 4: "drive", 5: "amp", 6: "octave", 7: "chorus",
             8: "phaser", 9: "tremolo", 10: "delay", 11: "reverb", 12: "cab"}
@@ -303,6 +303,29 @@ def unpack_meters(p):
     return dict(in_peak_cdb=i, out_peak_cdb=o, clip_count=c)
 
 
+def pack_set_tuner(on, mute):
+    return struct.pack("<BB", 1 if on else 0, 1 if on and mute else 0)
+
+
+def unpack_set_tuner(p):
+    if len(p) != 2 or p[0] > 1 or p[1] > 1:
+        raise ValueError("bad SET_TUNER")
+    return dict(on=bool(p[0]), mute=bool(p[1]))
+
+
+def pack_tuner(freq_mhz, level_cdb, clarity):
+    if not 0 <= clarity <= 100:
+        raise ValueError("bad TUNER clarity")
+    return struct.pack("<IhB", freq_mhz, level_cdb, clarity)
+
+
+def unpack_tuner(p):
+    if len(p) != 7 or p[6] > 100:
+        raise ValueError("bad TUNER")
+    f, l, c = struct.unpack("<IhB", p)
+    return dict(freq_mhz=f, level_cdb=l, clarity=c)
+
+
 def pack_model_begin(transfer_id, weight_count, crc, name):
     return struct.pack("<BHII", transfer_id, weight_count, weight_count * 4, crc) + _text(name, MODEL_NAME_LEN)
 
@@ -343,6 +366,7 @@ UNPACKERS = {
     SET_PARAMS: unpack_set_params, SET_FX_STATE: unpack_set_fx_state, SET_CHAIN: unpack_set_chain,
     SET_MASTER: unpack_set_master, SELECT_MODEL: unpack_select_model, SNAPSHOT_BEGIN: unpack_snapshot,
     SNAPSHOT_END: unpack_snapshot, STATUS: unpack_status, METERS: unpack_meters, MODEL_BEGIN: unpack_model_begin,
+    SET_TUNER: unpack_set_tuner, TUNER: unpack_tuner,
     MODEL_CHUNK: unpack_model_chunk, MODEL_COMMIT: unpack_model_end, MODEL_RESULT: unpack_model_end,
     MODEL_ABORT: unpack_model_end, LOG: lambda p: p.decode("utf-8", errors="replace"),
 }

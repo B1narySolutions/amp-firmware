@@ -15,7 +15,7 @@ without allocating.
 | | |
 |---|---|
 | Interface | UART, 8N1, no flow control, 3.3 V logic |
-| Baud | 1,000,000 (configurable on the ESP32 in menuconfig; both ends must match) |
+| Baud | 230,400 (configurable on the ESP32 in menuconfig; both ends must match). The amp board's 10k series resistors on the display UART (R8, R9) are fine to 230,400 and not faster; a bare Seed ran 1,000,000. |
 | ESP32 side | UART0, GPIO43 TX / GPIO44 RX, on header H3 "UART2" (SW1 set to UART2) |
 | Seed side | USART1, D13 TX (PB6) / D14 RX (PB7), carrier header J4 "DISPLAY_UART" |
 | Byte order | Little-endian everywhere |
@@ -118,8 +118,10 @@ Type values, direction, and payload size:
 | 0x14 | SELECT_MODEL | UI to Seed | 6 |
 | 0x15 | SNAPSHOT_BEGIN | UI to Seed | 3 |
 | 0x16 | SNAPSHOT_END | UI to Seed | 3 |
+| 0x17 | SET_TUNER | UI to Seed | 2 |
 | 0x20 | STATUS | Seed to UI | 17 |
 | 0x21 | METERS | Seed to UI | 8 |
+| 0x22 | TUNER | Seed to UI | 7 |
 | 0x30 | MODEL_BEGIN | UI to Seed | 43, ACK_REQ |
 | 0x31 | MODEL_CHUNK | UI to Seed | 6 to 197, ACK_REQ |
 | 0x32 | MODEL_COMMIT | UI to Seed | 6 |
@@ -239,7 +241,7 @@ model and sets `MODEL_FAILED` in STATUS; the ESP32 then uploads it again and re-
 | 8 | 1 | active model kind (as SELECT_MODEL) |
 | 9 | 1 | active built-in id |
 | 10 | 4 | active uploaded model CRC32 |
-| 14 | 1 | flags: bit 0 bypass, bit 1 model failed to load, bit 2 audio running |
+| 14 | 1 | flags: bit 0 bypass, bit 1 model failed to load, bit 2 audio running, bit 3 has a tuner (answers SET_TUNER) |
 | 15 | 2 | last snapshot id applied completely |
 
 ### METERS (0x21), about 30 Hz
@@ -252,6 +254,26 @@ model and sets `MODEL_FAILED` in STATUS; the ESP32 then uploads it again and re-
 
 These drive the IN/OUT meters on the main screen. The ESP32 shows nothing (empty meters) when
 the link is down; it never invents levels.
+
+### SET_TUNER (0x17) and TUNER (0x22): the tuner
+
+| SET_TUNER offset | Size | Field |
+|---|---|---|
+| 0 | 1 | 1 = the tuner page is open, 0 = closed |
+| 1 | 1 | 1 = silence the output while it's open (0 when closed) |
+
+| TUNER offset | Size | Field |
+|---|---|---|
+| 0 | 4 | the input's pitch in milli-Hz (u32; 82407 = the low E string); 0 = no clear pitch |
+| 4 | 2 | input RMS, centi-dBFS (i16; -12000 = silence) |
+| 6 | 1 | clarity, 0 to 100 (how clean the period was) |
+
+The ESP32 sends SET_TUNER only to a Seed whose STATUS has the tuner bit (bit 3): at once when its
+tuner page opens or closes, and again every second while it's open. SET_TUNER isn't state: it's
+outside snapshots and not counted in SNAPSHOT_END. While the tuner is on the Seed sends TUNER
+about 20 times a second, and mutes its output if asked. **A Seed that hears no SET_TUNER for
+2.5 s turns its tuner off and lifts the mute**, so a touchscreen reset or a pulled cable can't
+leave the amp silent. Older firmware on either side ignores both messages. Details: [TUNER.md](TUNER.md).
 
 ### Model upload: MODEL_BEGIN (0x30), MODEL_CHUNK (0x31), MODEL_COMMIT (0x32), MODEL_RESULT (0x33), MODEL_ABORT (0x34)
 

@@ -39,7 +39,7 @@ before handing the Seed back to the team.
 With all six effects the app no longer fits the Seed's 128 KB internal flash (8.5 KB over), so both scripts now
 default to the Daisy bootloader: the internal flash holds libDaisy's Daisy bootloader, and the app lives in the
 Seed's 8 MB QSPI flash; the bootloader copies it into the 512 KB AXI SRAM at power-up, so the app can be about
-**480 KB** (it uses 199 KB). `--internal` builds and flashes the old way, and says when it doesn't fit.
+**480 KB** (it uses 210 KB). `--internal` builds and flashes the old way, and says when it doesn't fit.
 [STM32H750IB_sram_app.lds](STM32H750IB_sram_app.lds) keeps the app's data, bss and heap in the AXI SRAM as in the
 normal build (libDaisy's own BOOT_SRAM script moves them to the DTCM and D2 RAM, where the amp model and reverb
 don't both fit).
@@ -61,9 +61,8 @@ link up within about 1 s, amp cards switch the Seed's amp, mute silences its out
 [../docs/SEED_LINK_STATUS.md](../docs/SEED_LINK_STATUS.md). SD amp profiles (TONE3000 A2 files on the touchscreen's
 card) upload and run on the Seed since 2026-10-15; see [../docs/PDR_DEMO.md](../docs/PDR_DEMO.md).
 
-**The effects** ([../docs/EFFECTS.md](../docs/EFFECTS.md)): delay and reverb ran on the borrowed Seed on 2026-10-19
-(0 overruns, worst case 67 % DSP); the build with all six (gate, comp, drive, chorus added 2026-10-20) hasn't run on a
-Seed yet. USB console keys toggle them for bench tests without the touchscreen: `G` gate, `K` comp, `O` Tube Screamer,
+**The effects** ([../docs/EFFECTS.md](../docs/EFFECTS.md)): all six ran on the borrowed Seed on 2026-10-20: 0 overruns,
+81.5 % peak DSP with the most expensive of each on at once, about 69 % for a typical rig. USB console keys toggle them for bench tests without the touchscreen: `G` gate, `K` comp, `O` Tube Screamer,
 `M` Big Muff, `H` chorus, `D` delay, `R` hall, `S` spring. Not listened to yet (no audio hardware on that Seed).
 
 ## Keeping it current

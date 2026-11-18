@@ -54,9 +54,11 @@ enum {
     SLP_SELECT_MODEL   = 0x14,
     SLP_SNAPSHOT_BEGIN = 0x15,
     SLP_SNAPSHOT_END   = 0x16,
+    SLP_SET_TUNER      = 0x17,  // not state: outside snapshots, repeated each second while on
     // Seed -> ESP32: telemetry
     SLP_STATUS         = 0x20,
     SLP_METERS         = 0x21,
+    SLP_TUNER          = 0x22,  // only while the tuner is on
     // ESP32 -> Seed model upload, and the Seed's answer
     SLP_MODEL_BEGIN    = 0x30,
     SLP_MODEL_CHUNK    = 0x31,
@@ -95,6 +97,7 @@ enum {
 #define SLP_STATUS_BYPASS        0x01
 #define SLP_STATUS_MODEL_FAILED  0x02
 #define SLP_STATUS_AUDIO_RUNNING 0x04
+#define SLP_STATUS_HAS_TUNER     0x08  // the Seed answers SET_TUNER with TUNER frames
 
 // SNAPSHOT reasons
 enum { SLP_SNAP_HELLO = 1, SLP_SNAP_PRESET = 2, SLP_SNAP_BOOT = 3, SLP_SNAP_PERIODIC = 4, SLP_SNAP_RESYNC = 5 };
@@ -280,6 +283,21 @@ typedef struct {
 } slp_meters_t;
 size_t slp_meters_pack(const slp_meters_t *m, uint8_t *buf, size_t cap);
 bool slp_meters_unpack(const uint8_t *p, size_t len, slp_meters_t *m);
+
+typedef struct {
+    uint8_t on;                    // 1 = the tuner page is open: send TUNER frames
+    uint8_t mute;                  // 1 = silence the output meanwhile
+} slp_set_tuner_t;
+size_t slp_set_tuner_pack(const slp_set_tuner_t *m, uint8_t *buf, size_t cap);
+bool slp_set_tuner_unpack(const uint8_t *p, size_t len, slp_set_tuner_t *m);
+
+typedef struct {
+    uint32_t freq_mhz;             // the string's pitch in milli-Hz; 0 = no clear pitch
+    int16_t level_cdb;             // input RMS, centi-dBFS (SLP_METER_SILENCE for silence)
+    uint8_t clarity;               // 0..100: how clean the period was (100 = a pure tone)
+} slp_tuner_t;
+size_t slp_tuner_pack(const slp_tuner_t *m, uint8_t *buf, size_t cap);
+bool slp_tuner_unpack(const uint8_t *p, size_t len, slp_tuner_t *m);
 
 typedef struct {
     uint8_t transfer_id;

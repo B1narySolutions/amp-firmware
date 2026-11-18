@@ -51,6 +51,8 @@ enum { UP_IDLE, UP_BEGIN, UP_CHUNKS, UP_COMMIT };
 #define TASK_CORE             0
 #define EVT_RIG_CHANGED       (UART_EVENT_MAX + 1)  // posted into the UART event queue by rig_state
 #define EVT_PING              (UART_EVENT_MAX + 2)
+#define TUNER_REPEAT_US       1000000  // SET_TUNER again while on; the Seed gives up after 2.5 s
+#define TUNER_FRESH_US        300000   // readings come at 20 Hz
 
 #if CONFIG_SEED_LINK_ENABLE
 #define LINK_UART ((uart_port_t)CONFIG_SEED_LINK_UART_NUM)
@@ -64,6 +66,11 @@ static int s_builtin_count;
 static uint32_t s_builtins_version;
 static QueueHandle_t s_events;
 static char s_transport[64] = "disabled in menuconfig";
+// Set by the UI task, read by the link task; the *_changed flags wake it (on_rig_changed).
+static bool s_fx_hidden, s_fx_hidden_changed;
+static bool s_tuner_on, s_tuner_mute, s_tuner_changed;
+static seed_link_tuner_t s_tuner;          // the latest TUNER reading, guarded by s_mux
+static int64_t s_tuner_at;                 // when it arrived, guarded by s_mux
 
 // --- link task state (only the link task touches these) -------------------------------------
 typedef struct {
@@ -75,6 +82,7 @@ typedef struct {
     bool peer_known;            // we've had a HELLO since boot (peer_boot_id is valid)
     uint32_t peer_boot_id;
     int64_t last_rx_us, last_meters_us;
+    int64_t next_tuner_us;      // the next SET_TUNER repeat while the tuner is on
     int64_t next_hello_us, next_heartbeat_us, next_snapshot_us;
     uint8_t want_snapshot;      // SLP_SNAP_* reason, 0 = none
     bool pend_chain, pend_fx, pend_master;
@@ -159,9 +167,11 @@ static void send_chain(const rig_t *r) {
 }
 
 static void send_fx_state(const rig_t *r) {
+    const bool hidden = __atomic_load_n(&s_fx_hidden, __ATOMIC_RELAXED);
     slp_set_fx_state_t s = { .count = UI_EFFECT_COUNT };
     for (int fx = 0; fx < UI_EFFECT_COUNT; fx++) {
-        s.fx[fx] = (slp_fx_entry_t){ k_fx_wire_id[fx], r->on[fx], r->model[fx] };
+        const bool on = r->on[fx] && (!hidden || fx == FX_AMP || fx == FX_CAB);
+        s.fx[fx] = (slp_fx_entry_t){ k_fx_wire_id[fx], on, r->model[fx] };
     }
     uint8_t p[64];
     send_frame(SLP_SET_FX_STATE, p, slp_set_fx_state_pack(&s, p, sizeof(p)), 0);
@@ -232,6 +242,7 @@ static void send_snapshot(uint8_t reason) {
 // State changes from rig_state
 
 static void take_rig_changes(void) {
+    if (__atomic_exchange_n(&s_fx_hidden_changed, false, __ATOMIC_ACQUIRE)) L->pend_fx = true;
     uint64_t knobs;
     const uint32_t dirty = rig_take_dirty(&knobs);
     if (!dirty) return;
@@ -602,6 +613,18 @@ static void on_frame(const slp_frame_t *f) {
         portEXIT_CRITICAL(&s_mux);
         break;
     }
+    case SLP_TUNER: {
+        slp_tuner_t t;
+        if (!slp_tuner_unpack(f->payload, f->len, &t)) break;
+        portENTER_CRITICAL(&s_mux);
+        s_tuner.freq_hz = (float)t.freq_mhz / 1000.0f;
+        s_tuner.level_dbfs = (float)t.level_cdb / 100.0f;
+        s_tuner.clarity = t.clarity;
+        s_tuner.seq++;
+        s_tuner_at = now;
+        portEXIT_CRITICAL(&s_mux);
+        break;
+    }
     case SLP_ACK: {
         slp_ack_t a;
         if (slp_ack_unpack(f->payload, f->len, &a)) upload_on_ack(&a);
@@ -668,6 +691,18 @@ static uint32_t ms_until(int64_t t, int64_t now) {
     return ms > 1000 ? 1000 : (uint32_t)ms;
 }
 
+// SET_TUNER: at once when the page opens or closes, then each second while it's open. A change made
+// while the link is down isn't sent; the repeat carries an open tuner once it's back.
+static void tuner_tick(int64_t now) {
+    const bool changed = __atomic_exchange_n(&s_tuner_changed, false, __ATOMIC_ACQUIRE);
+    const bool on = __atomic_load_n(&s_tuner_on, __ATOMIC_RELAXED);
+    if (!changed && !(on && now >= L->next_tuner_us)) return;
+    const slp_set_tuner_t m = { on ? 1 : 0, on && __atomic_load_n(&s_tuner_mute, __ATOMIC_RELAXED) ? 1 : 0 };
+    uint8_t p[2];
+    send_frame(SLP_SET_TUNER, p, slp_set_tuner_pack(&m, p, sizeof(p)), 0);
+    L->next_tuner_us = now + TUNER_REPEAT_US;
+}
+
 static void link_task(void *arg) {
     (void)arg;
     for (;;) {
@@ -678,6 +713,7 @@ static void link_task(void *arg) {
             uint32_t w = ms_until(L->next_snapshot_us, now); if (w < wait) wait = w;
             w = flush_wait_ms((uint32_t)(now / 1000)); if (w < wait) wait = w;
             if (L->up.state != UP_IDLE && wait > 20) wait = 20;
+            if (__atomic_load_n(&s_tuner_on, __ATOMIC_RELAXED)) { w = ms_until(L->next_tuner_us, now); if (w < wait) wait = w; }
         }
 
         uart_event_t ev;
@@ -708,6 +744,7 @@ static void link_task(void *arg) {
             else if (now >= L->next_snapshot_us) send_snapshot(SLP_SNAP_PERIODIC);
             flush_state((uint32_t)(now / 1000));
             upload_tick(now);
+            tuner_tick(now);
         } else {
             // Nobody to send to: the snapshot on (re)connect carries everything.
             L->pend_chain = L->pend_fx = L->pend_master = false;
@@ -799,6 +836,35 @@ void seed_link_reset_counters(void) {
 }
 
 const char *seed_link_transport(void) { return s_transport; }
+
+void seed_link_set_effects_hidden(bool hidden) {
+    __atomic_store_n(&s_fx_hidden, hidden, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_fx_hidden_changed, true, __ATOMIC_RELEASE);
+#if CONFIG_SEED_LINK_ENABLE
+    // At boot the UI applies the saved mode before seed_link_init: the first snapshot reads the flag.
+    if (s_events) on_rig_changed();
+#endif
+}
+
+void seed_link_set_tuner(bool on, bool mute) {
+    __atomic_store_n(&s_tuner_mute, mute, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_tuner_on, on, __ATOMIC_RELAXED);
+    __atomic_store_n(&s_tuner_changed, true, __ATOMIC_RELEASE);
+#if CONFIG_SEED_LINK_ENABLE
+    if (s_events) on_rig_changed();
+#endif
+}
+
+void seed_link_get_tuner(seed_link_tuner_t *out) {
+    const int64_t now = esp_timer_get_time();
+    portENTER_CRITICAL(&s_mux);
+    *out = s_tuner;
+    out->connected = s_stats.connected;
+    out->supported = s_stats.connected && s_stats.status_valid && (s_stats.status_flags & SLP_STATUS_HAS_TUNER);
+    out->fresh = out->supported && s_tuner_at && now - s_tuner_at < TUNER_FRESH_US;
+    out->mock = s_stats.peer_mock;
+    portEXIT_CRITICAL(&s_mux);
+}
 
 int seed_link_get_builtins(seed_link_builtin_t *out, int max, uint32_t *version) {
     portENTER_CRITICAL(&s_mux);

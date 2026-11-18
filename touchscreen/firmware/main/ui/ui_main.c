@@ -1,4 +1,6 @@
 #include "ui_main.h"
+#include "ui_tuner.h"
+#include "amp_encoder.h"
 #include "ui_theme.h"
 #include "ui_effects_data.h"
 #include "ui_effect_chip.h"
@@ -44,6 +46,7 @@ static lv_obj_t *s_model_row, *s_amp_status;
 static lv_obj_t *s_knob_row;
 static lv_obj_t *s_curve_col, *s_curve_caption;
 static lv_obj_t *s_preset_label, *s_edited_badge;
+static lv_obj_t *s_preset_group, *s_save_btn; // top bar; hidden in Seed controls only
 static lv_obj_t *s_wifi_dot, *s_ble_dot;
 static lv_obj_t *s_meter_in, *s_meter_out, *s_meter_mock;
 static lv_obj_t *s_master_slider, *s_master_value;
@@ -55,6 +58,7 @@ static lv_obj_t *s_preset_names[UI_PRESET_COUNT];
 static lv_obj_t *s_catalog_backdrop;
 static lv_obj_t *s_catalog_pills[UI_CHAIN_MAX];
 static lv_obj_t *s_screen, *s_rail_band, *s_fx_panel, *s_presets_btn, *s_wifi_status, *s_ble_status;
+static lv_obj_t *s_tuner_btn; // shown only while the Seed reports a tuner (seed_link_get_tuner)
 static lv_obj_t *s_wifi_row, *s_ble_row, *s_seed_only_switch, *s_seed_only_knob;
 
 static void rebuild_rail(void);
@@ -451,6 +455,7 @@ static void build_top_bar(lv_obj_t *screen) {
     lv_obj_clear_flag(bar, LV_OBJ_FLAG_SCROLLABLE);
 
     lv_obj_t *left = make_row(bar, 12);
+    s_preset_group = left;
     make_label(left, "PRESET", &lv_font_montserrat_12, UI_COLOR_TEXT_MUTED);
     s_preset_label = make_label(left, s_preset_name, &lv_font_montserrat_16, UI_COLOR_TEXT);
     s_edited_badge = make_label(left, "EDITED", &lv_font_montserrat_12, UI_COLOR_ON_ACCENT);
@@ -467,6 +472,7 @@ static void build_top_bar(lv_obj_t *screen) {
     refresh_status_dots();
 
     lv_obj_t *save_btn = lv_button_create(right);
+    s_save_btn = save_btn;
     lv_obj_set_size(save_btn, 100, 38);
     lv_obj_set_style_bg_color(save_btn, UI_COLOR_ACCENT, 0);
     lv_obj_set_style_radius(save_btn, 9, 0);
@@ -802,6 +808,14 @@ static int32_t meter_px(float dbfs) {
 
 static void meter_timer_cb(lv_timer_t *t) {
     (void)t;
+    // The Tuner button: only with a Seed that runs the tuner, in both the full UI and Seed-only.
+    seed_link_tuner_t tuner;
+    seed_link_get_tuner(&tuner);
+    if (s_tuner_btn && lv_obj_has_flag(s_tuner_btn, LV_OBJ_FLAG_HIDDEN) == tuner.supported) {
+        if (tuner.supported) lv_obj_clear_flag(s_tuner_btn, LV_OBJ_FLAG_HIDDEN);
+        else lv_obj_add_flag(s_tuner_btn, LV_OBJ_FLAG_HIDDEN);
+    }
+    amp_encoder_process();
     apply_external_changes();
     amp_models_sync_from_seed();
     if (s_selected_fx == FX_AMP && !s_seed_only) {
@@ -940,6 +954,7 @@ static void build_fx_panel(lv_obj_t *screen) {
 
 static void presets_btn_cb(lv_event_t *e) { (void)e; lv_obj_clear_flag(s_drawer_backdrop, LV_OBJ_FLAG_HIDDEN); }
 static void settings_btn_cb(lv_event_t *e) { (void)e; lv_obj_clear_flag(s_settings_backdrop, LV_OBJ_FLAG_HIDDEN); }
+static void tuner_btn_cb(lv_event_t *e) { (void)e; ui_tuner_open(); }
 
 static void refresh_master(void) {
     const bool muted = rig()->muted;
@@ -984,6 +999,8 @@ static void build_bottom_bar(lv_obj_t *screen) {
 
     s_presets_btn = make_ghost_btn(bar, "Presets", 110, presets_btn_cb);
     make_ghost_btn(bar, "Settings", 110, settings_btn_cb);
+    s_tuner_btn = make_ghost_btn(bar, "Tuner", 110, tuner_btn_cb);
+    lv_obj_add_flag(s_tuner_btn, LV_OBJ_FLAG_HIDDEN);
 
     lv_obj_t *master = make_row(bar, 16);
     lv_obj_set_flex_grow(master, 1);
@@ -1580,8 +1597,8 @@ static void build_seed_page(lv_obj_t *screen) {
     lv_obj_set_width(s_seed_amp_status, LV_PCT(100));
     lv_label_set_long_mode(s_seed_amp_status, LV_LABEL_LONG_WRAP);
 
-    lv_obj_t *cab = make_label(main, "CABINET   The Seed's speaker cabinet EQ follows the amp. It is fixed and always on; "
-                                     "it has no controls yet.", &lv_font_montserrat_12, UI_COLOR_TEXT_MUTED);
+    lv_obj_t *cab = make_label(main, "CABINET   The Seed's speaker cabinet EQ follows the amp: on for amp-only captures and "
+                                     "SD profiles, off for captures that include their own speaker. It has no controls yet.", &lv_font_montserrat_12, UI_COLOR_TEXT_MUTED);
     lv_obj_set_width(cab, LV_PCT(100));
     lv_label_set_long_mode(cab, LV_LABEL_LONG_WRAP);
 
@@ -1643,13 +1660,17 @@ static void apply_seed_only(void) {
     const bool on = s_seed_only;
     set_hidden(s_rail_band, on);
     set_hidden(s_fx_panel, on);
-    // Presets mostly set effects the Seed doesn't run; the radios aren't wired up yet.
+    // Presets mostly set effects the Seed doesn't run; the radios aren't wired up yet. The preset
+    // name, EDITED badge and SAVE go with them: nothing in this mode can load a saved preset.
     set_hidden(s_presets_btn, on);
+    set_hidden(s_preset_group, on);
+    set_hidden(s_save_btn, on);
     set_hidden(s_wifi_status, on);
     set_hidden(s_ble_status, on);
     set_hidden(s_wifi_row, on);
     set_hidden(s_ble_row, on);
     set_switch(s_seed_only_switch, s_seed_only_knob, on);
+    seed_link_set_effects_hidden(on); // the page shows no effects, so the Seed plays none
     if (on) {
         for (int fx = 0; fx < FX_CAB; fx++) s_chips[fx] = NULL;
         lv_obj_clean(s_rail);

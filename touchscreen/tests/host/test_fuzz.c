@@ -13,7 +13,7 @@ static void unpack_any(uint8_t type, const uint8_t *p, size_t len) {
         slp_hello_t hello; slp_heartbeat_t hb; slp_ping_t ping; slp_ack_t ack; slp_set_params_t sp;
         slp_set_fx_state_t fs; slp_set_chain_t ch; slp_set_master_t ms; slp_select_model_t sm;
         slp_snapshot_t ss; slp_status_t st; slp_meters_t me; slp_model_begin_t mb;
-        slp_model_chunk_t mc; slp_model_end_t mend;
+        slp_model_chunk_t mc; slp_model_end_t mend; slp_set_tuner_t stn; slp_tuner_t tn;
     } u;
     switch (type) {
     case SLP_HELLO: slp_hello_unpack(p, len, &u.hello); break;
@@ -28,6 +28,8 @@ static void unpack_any(uint8_t type, const uint8_t *p, size_t len) {
     case SLP_SNAPSHOT_BEGIN: case SLP_SNAPSHOT_END: slp_snapshot_unpack(p, len, &u.ss); break;
     case SLP_STATUS: slp_status_unpack(p, len, &u.st); break;
     case SLP_METERS: slp_meters_unpack(p, len, &u.me); break;
+    case SLP_SET_TUNER: slp_set_tuner_unpack(p, len, &u.stn); break;
+    case SLP_TUNER: slp_tuner_unpack(p, len, &u.tn); break;
     case SLP_MODEL_BEGIN: slp_model_begin_unpack(p, len, &u.mb); break;
     case SLP_MODEL_CHUNK:
         if (slp_model_chunk_unpack(p, len, &u.mc)) {

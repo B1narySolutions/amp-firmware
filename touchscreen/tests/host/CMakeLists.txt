@@ -20,12 +20,19 @@ endif()
 
 add_library(slp STATIC ${PROTO_SRC} "${NAM_DIR}/nam_a2.c")
 target_include_directories(slp PUBLIC "${PROTO_DIR}" "${NAM_DIR}")
+# The receiver as the Seed's effects build has it, with the tuner hook (slp_receiver.h).
+target_compile_definitions(slp PUBLIC SLP_RX_TUNER)
 target_compile_options(slp PRIVATE ${WARN} ${SAN})
 set_property(TARGET slp PROPERTY C_STANDARD 99)
 
-add_executable(host_tests main.c test_proto.c test_fuzz.c test_coalesce.c test_nam.c test_receiver.c)
+add_executable(host_tests main.c test_proto.c test_fuzz.c test_coalesce.c test_nam.c test_receiver.c test_tuner_note.c
+    "${CMAKE_CURRENT_LIST_DIR}/../../firmware/main/ui/tuner_note.c")
+target_include_directories(host_tests PRIVATE "${CMAKE_CURRENT_LIST_DIR}/../../firmware/main/ui")
 target_compile_definitions(host_tests PRIVATE REPO_ROOT="${REPO_ROOT}")
 target_link_libraries(host_tests PRIVATE slp)
+if(NOT MSVC)
+    target_link_libraries(host_tests PRIVATE m) # log2f, lroundf (tuner_note.c)
+endif()
 target_compile_options(host_tests PRIVATE ${WARN} ${SAN})
 set_property(TARGET host_tests PROPERTY C_STANDARD 11)
 

@@ -6,14 +6,16 @@ All six don't fit the 128 KB internal flash (8.5 KB over), but they fit easily u
 which I tested on a Seed. Switching the team firmware to it is your decision.
 
 Everything below is done in `docs/seed3-link.patch` (on top of your `1636ef6`) and builds with
-`seed3-link-firmware/build.sh`. Delay and reverb ran on a Seed on 2026-10-19 (0 overruns, worst case 67 %
-DSP); the build with all six hasn't run on a Seed yet. Nothing has been listened to on the Seed yet.
+`seed3-link-firmware/build.sh`. All six ran on a Seed on 2026-10-20: 0 overruns, 81.5 % peak DSP with the
+most expensive of each on at once (Big Muff, Ensemble chorus, spring reverb, plus gate, comp, delay).
+Nothing has been listened to on the Seed yet.
 
 ## 1. The code
 
 - Copy `seed-dsp/effects.h` and `effects.cpp` into `src/fx/`. Plain C++: no allocation, no libDaisy, no
-  libm (same reason as your cab filter's constexpr coefficients). 9.1 KB compiled for size.
-- `make/firmware.mk`: add `src/fx/effects.cpp` to `CPP_SOURCES`, and `$(BUILD_DIR)/effects.o: CPPFLAGS += -Os`.
+  libm (same reason as your cab filter's constexpr coefficients).
+- `make/firmware.mk`: add `src/fx/effects.cpp` to `CPP_SOURCES` (at your -O3: compiled for size it was
+  up to 60 % slower).
 - `main.cpp`:
   - Memory: `static float DSY_SDRAM_BSS delay_mem[fx::Delay::kMemFloats];` (196 KB),
     `static float DTCM_MEM_SECTION reverb_mem[fx::Reverb::kMemFloats];` (100 KB; from the SDRAM the hall
@@ -28,15 +30,14 @@ DSP); the build with all six hasn't run on a Seed yet. Nothing has been listened
   - Console keys for bench tests without the touchscreen: `G` gate, `K` comp, `O` Tube Screamer, `M` Big
     Muff, `H` Ensemble chorus, `D` delay, `R` hall, `S` spring.
 
-Measured on the Seed so far: +14 us a block for the delay, +36 for the hall reverb, +68 for the spring.
-Estimated for the rest (from the Mac): about 60 us for the drive (it clips at 192 kHz against aliasing),
-15 for the chorus, a few for gate and comp.
+Measured on the Seed, per block: gate +9 us, comp +18, Tube Screamer +37, Big Muff +93 (it clips at
+192 kHz against aliasing), Ensemble chorus +28, delay +14, hall reverb +36, spring +68.
 
 ## 2. The Daisy bootloader (tested on a Seed, 2026-10-19)
 
 `APP_TYPE = BOOT_SRAM`: the Daisy bootloader sits in the internal flash; the app lives in the 8 MB QSPI and
 is copied into the 512 KB AXI SRAM at power-up, so code and data together can be about 480 KB (the build
-with all six effects uses 199 KB).
+with all six effects uses 210 KB).
 
 - libDaisy's own `STM32H750IB_sram.lds` moves `.data`/`.bss` to the DTCM and the heap to the D2 RAM; then
   the A2-Lite buffers (about 180 KB of heap) and the reverb don't fit. `seed3-link-firmware/
