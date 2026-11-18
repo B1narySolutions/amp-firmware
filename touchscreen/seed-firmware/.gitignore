@@ -1,0 +1,16 @@
+/libs/
+/build/
+# TONE3000 captures permit local use, not redistribution without permission.
+/models/local/
+/compile_commands.json
+/.cache/clangd/
+.DS_Store
+
+# Python tooling caches and the viz/ virtual environment.
+/.venv/
+__pycache__/
+*.py[cod]
+
+# Hardware test captures are large; the reports and results.json are small enough to keep.
+/hwtest/results/*/captures/
+/hwtest/results/latest
