@@ -31,8 +31,8 @@ jobs:
 
       # Build with the toolchain the firmware ships with, Arm GNU Toolchain
       # 15.3.Rel1. Ubuntu's own arm-none-eabi-gcc is 13.2, whose firmware is
-      # about 4 KB bigger: too close to the 128 KB of flash for the budgets in
-      # make/size_limits.json to mean the same thing here and on the desk.
+      # about 4 KB bigger, so the budgets in make/size_limits.json wouldn't
+      # mean the same thing here and on the desk.
       - name: Cache the Arm toolchain
         id: arm-toolchain
         uses: actions/cache@v4
@@ -78,14 +78,6 @@ jobs:
 
       - name: make check
         run: make check
-
-      # The touchscreen link builds compile the touchscreen's protocol, effects and tuner code,
-      # so these catch a change on either side that breaks the other.
-      - name: make link
-        run: make link
-
-      - name: make link-fx
-        run: make link-fx
 
       - name: Comment-only change builds identical firmware
         if: contains(github.event.pull_request.labels.*.name, 'comment-only')

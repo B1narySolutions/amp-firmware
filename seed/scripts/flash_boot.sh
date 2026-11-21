@@ -1,32 +1,34 @@
 #!/bin/bash
-# Flashes the touchscreen-link firmware with the effects (make link-fx) to the Seed3 over USB (DFU), always reading
-# a backup of what is on the Seed first.
+# Flashes a firmware image to the Seed3 over USB (DFU) through the Daisy bootloader, always reading a
+# backup of what is on the Seed first. make upload and make hwtest-upload run it.
 #
-#   bash scripts/flash_boot.sh               build/link-fx/passthrough.bin into the QSPI flash,
-#                                            installing the Daisy bootloader in the internal flash
-#                                            first if it is not there
+#   bash scripts/flash_boot.sh [IMAGE]       IMAGE (default build/passthrough.bin) into the QSPI
+#                                            flash, installing the Daisy bootloader in the internal
+#                                            flash first if it is not there
 #   bash scripts/flash_boot.sh --restore FILE
-#                                            put an internal-flash backup (or a normal make build)
-#                                            back; this also removes the bootloader
+#                                            put an internal-flash backup (or any internal-flash
+#                                            image) back; this also removes the bootloader
 #
-# Why: with the six effects the firmware no longer fits the Seed's 128 KB internal flash. The Daisy
-# bootloader lives in the internal flash and the app in the Seed's 8 MB QSPI flash; at power-up the
-# bootloader copies the app into the AXI SRAM (about 480 KB free) and starts it, 2 s after power-up.
+# Why: with the link, the six effects and the tuner the firmware doesn't fit the Seed's 128 KB
+# internal flash. The Daisy bootloader lives in the internal flash and the app in the Seed's 8 MB
+# QSPI flash; at power-up the bootloader copies the app into the AXI SRAM (about 480 KB) and starts
+# it, 2 s after power-up.
 #
-# Backups go to build/link-fx/backups/ (git-ignored; they contain the model weights).
+# Backups go to build/backups/ (git-ignored; they contain the model weights).
 # Needs dfu-util. Two DFU bootloaders can answer: the STM32's own (internal flash at 0x08000000) and
 # the Daisy bootloader (QSPI flash; apps at 0x90040000).
 set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/.." && pwd)"
-work="$root/build/link-fx"
+work="$root/build"
 mode=boot
 image="$work/passthrough.bin"
 boot_bin="$root/libs/libDaisy/core/dsy_bootloader_v6_4-intdfu-2000ms.bin"
 case "${1:-}" in
     --restore) mode=internal; image="${2:?usage: flash_boot.sh --restore FILE}" ;;
+    ?*) image="$1" ;;
 esac
-[[ -f "$image" ]] || { echo "No $image: run make link-fx first." >&2; exit 1; }
+[[ -f "$image" ]] || { echo "No $image: build it first (make build, make hwtest-build)." >&2; exit 1; }
 if [[ $mode == boot && ! -f "$boot_bin" ]]; then
     echo "Missing $boot_bin: run make install first." >&2
     exit 1
@@ -50,20 +52,26 @@ wait_dfu() { # up to $1 seconds
 # the Daisy bootloader for a bootloader build), 'U' = the STM32's (bootloader builds only).
 # The port is found by the Seed's USB id (0483:5740), so nothing is sent to the touchscreen;
 # SEED_PORT=/dev/... overrides.
+# Without pyserial, the one USB serial port if there is exactly one (as with only the Seed plugged in).
+pythons=("$root"/.venv/bin/python "$HOME"/.espressif/python_env/*/bin/python python3)
 find_seed_port() {
     [[ -n "${SEED_PORT:-}" ]] && { echo "$SEED_PORT"; return; }
     local py
-    for py in "$HOME"/.espressif/python_env/*/bin/python python3; do
+    for py in "${pythons[@]}"; do
         "$py" -c 'import serial.tools.list_ports as l
 for p in l.comports():
     if p.vid == 0x0483 and p.pid == 0x5740: print(p.device); break' 2>/dev/null && return
     done
+    shopt -s nullglob
+    local ports=(/dev/cu.usbmodem* /dev/ttyACM*)
+    [[ ${#ports[@]} -eq 1 ]] && echo "${ports[0]}"
+    return 0
 }
 send_key() {
     local port=$1 key=$2 py
     # Through pyserial when there is one (a plain shell write to the port didn't always arrive); a
     # Seed that has locked up never reads it, so don't let the write hang.
-    for py in "$HOME"/.espressif/python_env/*/bin/python python3; do
+    for py in "${pythons[@]}"; do
         "$py" -c 'import serial, sys, time
 s = serial.Serial(sys.argv[1], 115200, timeout=0.5, write_timeout=1)
 time.sleep(0.2)

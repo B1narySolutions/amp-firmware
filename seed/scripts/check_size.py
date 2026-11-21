@@ -1,15 +1,14 @@
 #!/usr/bin/env python3
 """Fails when a firmware image outgrows its budget in make/size_limits.json.
 
-Flash is the tight one: the STM32H750 has 128 KB, and the main firmware with
-its five embedded models uses most of it. The budgets sit a little above
-today's use, so an unplanned jump (libm pulled in by a stray sin(), a new
-dependency) fails here instead of at the linker once flash is full. When the
-growth is intended, raise the budget in the same change and say why.
-
-RAM figures are static use only (.data, .bss and the like). The models'
-delay lines are heap in SRAM; the host tests check those (kModelHeapBudget in
-tests/a2_test.cpp).
+Both images run under the Daisy bootloader, which copies them into the AXI
+SRAM, so SRAM is the tight one: it holds the code, the five embedded models,
+the static data and, after them, the heap the models' delay lines are built
+in (kModelHeapBudget in tests/a2_test.cpp, checked by the host tests). The
+budgets sit a little above today's use, so an unplanned jump (libm pulled in
+by a stray sin(), a new dependency) fails here instead of as a failed model
+load on the board. When the growth is intended, raise the budget in the same
+change and say why.
 
 Usage: check_size.py [--report]   (--report prints use without checking)
 """
@@ -21,7 +20,7 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-LINKER_SCRIPT = ROOT / "libs/libDaisy/core/STM32H750IB_flash.lds"
+LINKER_SCRIPT = ROOT / "make/STM32H750IB_sram_app.lds"
 LIMITS = ROOT / "make/size_limits.json"
 UNITS = {"K": 1024, "M": 1024 * 1024, "": 1}
 
@@ -31,8 +30,9 @@ def memory_regions():
     text = LINKER_SCRIPT.read_text()
     block = re.search(r"MEMORY\s*\{(.*?)\}", text, re.S).group(1)
     regions = {}
-    for name, origin, length, unit in re.findall(r"(\w+)\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*(0x[0-9a-fA-F]+),\s*LENGTH\s*=\s*(\d+)([KM]?)", block):
-        regions[name] = (int(origin, 16), int(length) * UNITS[unit])
+    # A length may subtract a reserved part, as in 512K - 32K.
+    for name, origin, length, unit, minus, minus_unit in re.findall(r"(\w+)\s*\([^)]*\)\s*:\s*ORIGIN\s*=\s*(0x[0-9a-fA-F]+),\s*LENGTH\s*=\s*(\d+)([KM]?)(?:\s*-\s*(\d+)([KM]?))?", block):
+        regions[name] = (int(origin, 16), int(length) * UNITS[unit] - int(minus or 0) * UNITS[minus_unit])
     return regions
 
 

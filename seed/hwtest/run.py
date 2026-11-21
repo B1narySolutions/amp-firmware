@@ -28,7 +28,7 @@ def git_describe():
 
 
 def make(target):
-    """Runs a make target from the repository root, passing PORT through."""
+    """Runs a make target from seed/, passing PORT through."""
     print(f"$ make {target}", flush=True)
     subprocess.run(["make", target], cwd=ROOT, check=True)
 

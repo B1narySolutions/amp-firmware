@@ -1,7 +1,5 @@
 #include "audio/nam_audio.h"
-#ifdef SEED_LINK
 #include "models/a2_lite.h"
-#endif
 #include <algorithm>
 #include <cmath>
 
@@ -41,7 +39,6 @@ bool NamAudio::LoadAmpModel(AmpId amp) {
     return ready_;
 }
 
-#ifdef SEED_LINK
 bool NamAudio::LoadUploadedModel(const float *weights) {
     ready_ = false;
 
@@ -59,7 +56,6 @@ bool NamAudio::LoadUploadedModel(const float *weights) {
     }
     return ready_;
 }
-#endif
 
 void NamAudio::SetCabinet(bool enabled) {
     cabinet_enabled_ = enabled;

@@ -15,7 +15,7 @@ Each repository keeps its own documentation alongside the work.
 On macOS, install [Homebrew](https://brew.sh) and Apple's Command Line Tools
 (`xcode-select --install`). On Ubuntu the installer uses `apt-get`, and on Arch
 it uses `pacman`; either way it requests `sudo` access when needed. Run from
-the repository root:
+`seed/`:
 
 ```sh
 bash scripts/install.sh
@@ -31,16 +31,15 @@ in the firmware. On Linux, the installer also installs the build and download
 prerequisites, including the ARM C/C++ libraries, Python 3 and `screen`, and adds
 a udev rule so `make upload` and `make monitor` can reach the Seed without root.
 
-## Touchscreen link
+## Touchscreen, effects and tuner
 
-`make build` and `make upload` don't include the link (byte-identical firmware). Two more builds add the
-link to the touchscreen in `../touchscreen`; its protocol code is the touchscreen's own
-`../touchscreen/firmware/main/seed_link_proto`, compiled unchanged:
-
-| Build | What it adds | Runs from |
-| --- | --- | --- |
-| `make link` / `make link-upload` | The link: amp select (incl. SD profiles), bypass, master and mute, DSP load and meters. The demo build, for the touchscreen's "Seed controls only" page. | Internal flash (the normal layout; about 28 bytes free) |
-| `make link-fx` / `make link-fx-upload` | The link plus the six effects (`../touchscreen/seed-dsp/effects`): gate, compressor, drive, chorus, delay, reverb, driven by the touchscreen's full UI. | QSPI flash through the Daisy bootloader (`scripts/flash_boot.sh` backs up the Seed and installs the bootloader if needed; `--restore FILE` puts a backup back) |
+The firmware also runs the link to the touchscreen in `../touchscreen`: amp select (including SD amp
+profiles the touchscreen uploads), bypass, master volume and mute, the DSP load and the meters. It runs
+the six effects the touchscreen's UI drives (`../touchscreen/seed-dsp/effects`: gate, compressor and
+drive before the amp, chorus, delay and reverb after it) and its tuner page
+(`../touchscreen/seed-dsp/tuner`). The protocol code is the touchscreen's own
+`../touchscreen/firmware/main/seed_link_proto`, compiled unchanged, so both ends always match. Without a
+touchscreen the firmware plays as it would without the link.
 
 The link runs at 230400 baud: the amp board's 10k series resistors (R8, R9) are fine to 230400 and not
 faster. Wiring to the touchscreen's H3: J3 1 GND to H3 2, J3 2 (TX, the Seed's) to H3 3 (the
@@ -54,8 +53,15 @@ make upload
 make monitor
 ```
 
+The firmware is too big for the Seed's 128 KB internal flash, so it runs under the Daisy bootloader:
+the bootloader sits in the internal flash, the firmware in the 8 MB QSPI flash, and at power-up the
+bootloader copies it into the AXI SRAM and starts it, 2 s after power-up. `make upload`
+(`scripts/flash_boot.sh`) backs up what is on the Seed to `build/backups/`, installs the bootloader if
+it isn't there yet, and flashes the firmware through it. `bash scripts/flash_boot.sh --restore FILE`
+puts an internal-flash backup back, which removes the bootloader.
+
 If this firmware is already running, `make upload` sends it `B` over USB
-serial and it reboots into DFU mode on its own. Otherwise (first flash, other
+serial and it reboots into the bootloader on its own. Otherwise (first flash, other
 firmware, or a hung board), hold **BOOT**, press and release **RESET**, then
 release **BOOT** to enter DFU mode before running `make upload`.
 
@@ -71,7 +77,9 @@ to switch models or bypass; no Enter is needed:
 | `4` | Fender '65 Princeton Reverb (edge of breakup) |
 | `5` | Randall Satan 50 |
 | `C` | Cabinet EQ on or off (each amp starts with it on, except the Princeton and Randall) |
-| `B` | Reboot into DFU mode for flashing |
+| `B` | Reboot into the Daisy bootloader for flashing |
+| `U` | Reboot into the STM32's own DFU (to replace or remove the bootloader) |
+| `G` `K` `O` `M` `H` `D` `R` `S` | Toggle an effect at the touchscreen's default settings, for bench tests without it: gate, compressor, drive (Tube Screamer), drive (Big Muff), chorus, delay, hall reverb, spring reverb |
 
 Audio runs at 48 kHz, with the left input processed and sent to both outputs.
 Switching models or toggling bypass or the cabinet briefly interrupts playback.
@@ -112,7 +120,7 @@ Exit the monitor with **Ctrl-A**, then **K**, then **Y**.
 The firmware prints one status line per second:
 
 ```
---- NAM A2-Lite | 48-sample blocks @ 48 kHz | budget 1000 us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab B=DFU ---
+--- NAM A2-Lite | 48-sample blocks @ 48 kHz | budget 1000 us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab G=gate K=comp O=drive M=fuzz H=chorus D=delay R=hall S=spring B=DFU U=STM-DFU ---
 [active Fender Twin65          ]  cab on   avg  55% ( 552 us)  peak  56% ( 562 us)  headroom   438 us  blocks 1000  overruns 0
 >>> bypass
 [bypass -                      ]  cab -    avg   0% (   3 us)  peak   0% (   3 us)  headroom   997 us  blocks 1000  overruns 0
