@@ -99,7 +99,8 @@ host controls over USB serial. The protocol is described at the top of
 
 All signal generation and analysis is in Python (`hwtest/analysis.py`), so a
 new test needs no firmware change. The test firmware uses the same clocks,
-sample rate and block size as the main firmware. It links no models, because
-the main firmware fills nearly all of the 128 KB of internal flash. The board
+sample rate and block size as the main firmware. It links no models, to keep it
+small. Like the main firmware it runs under the Daisy bootloader, so the two flash in turn
+without reinstalling it. The board
 starts with an SDRAM self-test, and its LED blinks fast so you can tell it
 apart from the main firmware.

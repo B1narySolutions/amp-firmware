@@ -1,7 +1,7 @@
 {
-  "_comment": "Size budgets in bytes, checked by scripts/check_size.py (make check-size). Each sits a little above use when it was set, so unplanned growth fails. Raise one in the change that needs it, and say why in the commit.",
+  "_comment": "Size budgets in bytes, checked by scripts/check_size.py (make check-size). Each sits a little above use when it was set, so unplanned growth fails. Raise one in the change that needs it, and say why in the commit. The main firmware's SRAM budget also keeps at least 216 KB of the 480 KB free for the heap, where the models' delay lines go (kModelHeapBudget is 128 KB); its DTCMRAM is the reverb's 100 KB, under the stack at the top.",
   "images": {
-    "build/passthrough.elf": {"FLASH": 126976, "SRAM": 65536, "RAM_D2": 32768},
-    "build/hwtest-fw/hwtest.elf": {"FLASH": 98304}
+    "build/passthrough.elf": {"SRAM": 270336, "DTCMRAM": 102400, "RAM_D2_DMA": 20480},
+    "build/hwtest-fw/hwtest.elf": {"SRAM": 131072}
   }
 }

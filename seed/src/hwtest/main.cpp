@@ -389,11 +389,11 @@ int main() {
     uint32_t last_blink_ms = 0;
     bool led_on = false;
     while (true) {
-        // Reboot into DFU if asked; does not return.
+        // Reboot into the Daisy bootloader if asked, for the next upload; does not return.
         if (bootloader_requested.load(std::memory_order_relaxed)) {
             seed.StopAudio();
             daisy::System::Delay(50);
-            daisy::System::ResetToBootloader();
+            daisy::System::ResetToBootloader(daisy::System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
         }
 
         // Report a finished or refused upload.

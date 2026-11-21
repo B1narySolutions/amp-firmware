@@ -1,21 +1,17 @@
 #include "audio/nam_audio.h"
 #include "daisy_seed.h"
-#include "models/a2_lite.h"
-#include <atomic>
-#include <cstdint>
-#include <cstdlib>
-#include <new>
-#ifdef SEED_LINK
-#include "slp_receiver.h"
-#ifdef SEED_FX
 #include "effects.h"
+#include "models/a2_lite.h"
+#include "slp_receiver.h"
 #include "tuner.h"
-#endif
 #include <algorithm>
+#include <atomic>
 #include <bit>
 #include <cmath>
+#include <cstdint>
+#include <cstdlib>
 #include <cstring>
-#endif
+#include <new>
 
 daisy::DaisySeed seed;
 static NamAudio audio;
@@ -30,11 +26,10 @@ static_assert(ATOMIC_INT_LOCK_FREE == 2, "Audio counters must be lock-free");
 // Only changed while audio is stopped.
 static bool bypass = false;
 
-#ifdef SEED_LINK
-// The touchscreen link (make link): the ESP32 touchscreen selects the amp, bypass and master
+// The touchscreen link: the ESP32 touchscreen selects the amp, bypass and master
 // volume/mute over USART1, and gets the DSP load and IN/OUT peaks back. The protocol and its
 // receiver are ../touchscreen/firmware/main/seed_link_proto/ (its docs/SEED_LINK_PROTOCOL.md).
-// Without a touchscreen the master gain stays exactly 1, so the sound is the plain build's.
+// Without a touchscreen the master gain stays exactly 1, so the amp sounds as it would without the link.
 static std::atomic<float> master_target{1.0f};
 static float master_gain = 1.0f; // Audio callback only.
 static std::atomic<float> in_peak{0.0f};
@@ -68,8 +63,7 @@ static uint32_t upload_requested_hash = 0;
 // requested_amp / current_command value while an uploaded model runs.
 static constexpr uint32_t kUploadedCommand = 255;
 
-#ifdef SEED_FX
-// The effects (make link-fx; ../touchscreen/seed-dsp/effects, as on Marcelo's touchscreen-link
+// The effects (../touchscreen/seed-dsp/effects, as on Marcelo's touchscreen-link
 // branch): gate, comp and drive before the amp model, chorus, delay and reverb after it, in the
 // touchscreen's chain order. The delay's 196 KB go in the SDRAM (it reads one line); the reverb
 // reads 12 lines every sample, too slow from the SDRAM (about 75 us a block), so its 100 KB go in
@@ -96,8 +90,6 @@ static constexpr uint32_t kTunerPeriodMs = 50;
 // SAI's divide by 1024 is 48014.3 Hz, not the 48000 it reports. Pitches read 0.52 cents flat
 // without this.
 static constexpr float kSeedAudioRate = 16e6f / 6.0f * 295.0f / 16.0f / 1024.0f;
-#endif
-#endif
 
 // Process must never allocate (amp_model.h). The host tests check that; this
 // catches it on the board. The callback marks itself, operator new counts
@@ -138,7 +130,6 @@ static void RecordCallbackTiming(uint32_t elapsed_us) {
     audio_callbacks.fetch_add(1, std::memory_order_relaxed);
 }
 
-#ifdef SEED_LINK
 // Raise a meter peak if this block's is higher; the main loop resets it.
 static void RaisePeak(std::atomic<float> &peak, float value) {
     float previous = peak.load(std::memory_order_relaxed);
@@ -149,11 +140,7 @@ static void RaisePeak(std::atomic<float> &peak, float value) {
 // Ramp to the touchscreen's master gain across the block (no clicks; mute reaches silence
 // within one block) and record peaks for its meters. At gain 1 the samples are unchanged.
 static void ApplyMasterAndMeasure(const float *in, float *out_left, float *out_right, size_t frame_count) {
-#ifdef SEED_FX
     const float target = tuner_mute.load(std::memory_order_relaxed) ? 0.0f : master_target.load(std::memory_order_relaxed);
-#else
-    const float target = master_target.load(std::memory_order_relaxed);
-#endif
     const float step = (target - master_gain) / static_cast<float>(frame_count);
     float in_max = 0.0f;
     float out_max = 0.0f;
@@ -170,7 +157,6 @@ static void ApplyMasterAndMeasure(const float *in, float *out_left, float *out_r
     RaisePeak(in_peak, in_max);
     RaisePeak(out_peak, out_max);
 }
-#endif
 
 void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioHandle::OutputBuffer output_channels, size_t frame_count) {
     // Measure in raw timer ticks: GetUs() wraps every ~17.9 s (2^32 ticks at
@@ -182,7 +168,6 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
     // Pass on the latest knob readings, which the ADC's DMA keeps current.
     audio.SetKnobs(seed.adc.GetFloat(kVolumeKnob), seed.adc.GetFloat(kToneKnob));
 
-#ifdef SEED_FX
     // Left input in, through the pedals, the amp and the effects after it, same signal out on
     // both channels. The amp reads a copy, so the input stays as it came for the IN meter.
     float pre[NamAudio::kBlockSize];
@@ -194,13 +179,7 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
     audio.Process(pre, output_channels[0], output_channels[1], n, bypass);
     rig.ProcessPost(output_channels[0], n);
     std::copy(output_channels[0], output_channels[0] + n, output_channels[1]);
-#else
-    // Left input in, same signal out on both channels.
-    audio.Process(input_channels[0], output_channels[0], output_channels[1], frame_count, bypass);
-#endif
-#ifdef SEED_LINK
     ApplyMasterAndMeasure(input_channels[0], output_channels[0], output_channels[1], frame_count);
-#endif
 
     // Record how long the block took.
     in_audio_callback.store(false, std::memory_order_relaxed);
@@ -212,7 +191,8 @@ void AudioCallback(daisy::AudioHandle::InputBuffer input_channels, daisy::AudioH
 // here.
 void OnUsbReceive(uint8_t *data, uint32_t *byte_count) {
     // '0'-'5' select bypass or an amp; 'C' toggles the cabinet; 'B' asks for
-    // the DFU bootloader.
+    // the Daisy bootloader and 'U' for the STM32's own DFU; the effect keys
+    // toggle an effect (ApplyFxKey).
     for (uint32_t i = 0; i < *byte_count; ++i) {
         if (data[i] >= '0' && data[i] <= '5')
             requested_amp.store(data[i] - '0', std::memory_order_relaxed);
@@ -220,19 +200,17 @@ void OnUsbReceive(uint8_t *data, uint32_t *byte_count) {
             cabinet_toggle_requested.store(true, std::memory_order_relaxed);
         else if (data[i] == 'B')
             bootloader_requested.store(true, std::memory_order_relaxed);
-#ifdef SEED_FX
         else if (data[i] == 'U') {
             stm_dfu_requested.store(true, std::memory_order_relaxed);
             bootloader_requested.store(true, std::memory_order_relaxed);
         } else if (data[i] && strchr("DRSGKOMHdrsgkomh", data[i]))
             fx_key.store(static_cast<char>(data[i] & ~0x20), std::memory_order_relaxed);
-#endif
     }
 }
 
-// Sent by scripts/enter_dfu.sh so make upload works without the BOOT and
-// RESET buttons. Drives the BOOT pin high and resets into the STM32 ROM DFU
-// bootloader; does not return.
+// Sent by scripts/flash_boot.sh so make upload works without the BOOT and
+// RESET buttons. Resets into the Daisy bootloader, which waits for a new app,
+// or with 'U' into the STM32 ROM DFU bootloader; does not return.
 static void EnterBootloaderIfRequested() {
     if (!bootloader_requested.load(std::memory_order_relaxed))
         return;
@@ -241,13 +219,9 @@ static void EnterBootloaderIfRequested() {
     seed.StopAudio();
     seed.PrintLine(">>> rebooting into DFU bootloader");
     seed.DelayMs(50); // Let the USB transfer finish before the reset.
-#if defined(SEED_FX) && defined(BOOT_APP)
     // Run by the Daisy bootloader: 'B' goes back to it and it waits for a new app (in QSPI); 'U'
     // goes to the STM32's own DFU, which can replace the bootloader itself (or restore a backup).
     daisy::System::ResetToBootloader(stm_dfu_requested.load(std::memory_order_relaxed) ? daisy::System::BootloaderMode::STM : daisy::System::BootloaderMode::DAISY_INFINITE_TIMEOUT);
-#else
-    daisy::System::ResetToBootloader();
-#endif
 }
 
 struct AppState {
@@ -259,7 +233,6 @@ struct AppState {
     uint32_t report_count = 0;
     bool knobs_reported = false;
     uint32_t reported_knob_percent[kKnobCount] = {};
-#ifdef SEED_LINK
     // An SD profile uploaded by the touchscreen is running (its CRC32), rather than a built-in.
     bool uploaded = false;
     uint32_t uploaded_hash = 0;
@@ -269,13 +242,10 @@ struct AppState {
     uint32_t total_overruns = 0;
     uint32_t last_status_ms = 0;
     uint32_t last_meters_ms = 0;
-#ifdef SEED_FX
     uint32_t last_tuner_ms = 0;
-#endif
     // Handshake recovery: when the link was last up or quiet, and the byte count then.
     uint32_t link_ok_ms = 0;
     uint32_t link_bytes_mark = 0;
-#endif
 #ifdef A2_LITE_PROFILE
     uint32_t profile_blocks = 0;
     uint32_t input_mark = 0;
@@ -325,11 +295,7 @@ static void ReportProfile(AppState &state) {
 }
 #endif
 
-#ifdef SEED_FX
 static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab G=gate K=comp O=drive M=fuzz H=chorus D=delay R=hall S=spring B=DFU U=STM-DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
-#else
-static void PrintHeader() { seed.PrintLine("--- NAM A2-Lite | %lu-sample blocks @ 48 kHz | budget %lu us/block | keys: 0=bypass 1=Twin65 2=AC30 3=JCM800 4=Princeton 5=Randall C=cab B=DFU ---", static_cast<unsigned long>(NamAudio::kBlockSize), static_cast<unsigned long>(kBlockBudgetUs)); }
-#endif
 
 static void InitHardware() {
     seed.Init(true); // 480 MHz boost; the model needs the headroom.
@@ -371,9 +337,7 @@ static void ApplyPendingAmpCommand(AppState &state) {
     if (!bypass) {
         state.selected_amp = static_cast<AmpId>(command);
         state.model_ready = audio.LoadAmpModel(state.selected_amp);
-#ifdef SEED_LINK
         state.uploaded = false;
-#endif
     }
     state.current_command = command;
 
@@ -450,20 +414,14 @@ static void ReportStatus(AppState &state) {
     const uint32_t peak_pct = max_us * 100 / kBlockBudgetUs;
     const int32_t headroom_us = static_cast<int32_t>(kBlockBudgetUs) - static_cast<int32_t>(max_us);
     const bool active = !bypass && state.model_ready;
-#ifdef SEED_LINK
     state.last_avg_us = avg_us;
     state.last_max_us = max_us;
     state.total_overruns += overrun_count;
-#endif
 
     // Print the status line.
     const char *mode = bypass ? "bypass" : (state.model_ready ? "active" : "failed");
     const char *cabinet = !active ? "-" : audio.CabinetEnabled() ? "on" : "off";
-#ifdef SEED_LINK
     seed.PrintLine("[%-6s %-22s]  cab %-3s  avg %3lu%% (%4lu us)  peak %3lu%% (%4lu us)  headroom %5ld us  blocks %4lu  overruns %lu%s", mode, active ? (state.uploaded ? "SD profile" : AmpName(state.selected_amp)) : "-", cabinet, static_cast<unsigned long>(avg_pct), static_cast<unsigned long>(avg_us), static_cast<unsigned long>(peak_pct), static_cast<unsigned long>(max_us), static_cast<long>(headroom_us), static_cast<unsigned long>(callbacks), static_cast<unsigned long>(overrun_count), overrun_count ? "  <-- OVERRUN" : "");
-#else
-    seed.PrintLine("[%-6s %-22s]  cab %-3s  avg %3lu%% (%4lu us)  peak %3lu%% (%4lu us)  headroom %5ld us  blocks %4lu  overruns %lu%s", mode, active ? AmpName(state.selected_amp) : "-", cabinet, static_cast<unsigned long>(avg_pct), static_cast<unsigned long>(avg_us), static_cast<unsigned long>(peak_pct), static_cast<unsigned long>(max_us), static_cast<long>(headroom_us), static_cast<unsigned long>(callbacks), static_cast<unsigned long>(overrun_count), overrun_count ? "  <-- OVERRUN" : "");
-#endif
     ReportKnobs(state);
 
     // An allocation in the callback is a bug; hwtest fails a run that shows one.
@@ -476,7 +434,6 @@ static void ReportStatus(AppState &state) {
 #endif
 }
 
-#ifdef SEED_LINK
 // Switches to an SD profile the touchscreen selected (OnSelectModel copied its weights).
 static void ApplyPendingUpload(AppState &state) {
     if (!upload_requested)
@@ -566,7 +523,6 @@ static void OnSelectModel(void *, const slp_select_model_t *m, const uint8_t *we
 
 static void OnLink(void *, bool up) { seed.PrintLine(">>> touchscreen link %s", up ? "up" : "lost"); }
 
-#ifdef SEED_FX
 // The tuner page opened, closed, or repeated its state (main loop, from PollLink).
 static void OnTuner(void *, bool on, bool mute) {
     tuner_heard_ms = daisy::System::GetNow();
@@ -621,11 +577,8 @@ static void ApplyFxKey() {
         seed.PrintLine(">>> %s %s", k.name, on ? "on" : "off");
     }
 }
-#endif
 
-// Without SEED_FX, the effects, their knobs, the chain order and the cabinet switch the
-// touchscreen also sends have no handler: this firmware doesn't run them, and the receiver skips
-// what has none. The cabinet EQ keeps each amp's default (NamAudio::LoadAmpModel).
+// Sets up USART1 and the link receiver with this firmware's amps and handlers.
 static void InitLink() {
     daisy::UartHandler::Config uart{};
     uart.periph = daisy::UartHandler::Config::Peripheral::USART_1;
@@ -647,7 +600,7 @@ static void InitLink() {
     cfg.block_size = NamAudio::kBlockSize;
     for (int i = 0; i < kAmpCount; ++i) {
         builtins[i].id = static_cast<uint8_t>(i + 1);
-        // A copy loop rather than snprintf, which costs flash this build doesn't have.
+        // A copy loop: snprintf would link more of newlib for a plain copy.
         const char *name = AmpName(static_cast<AmpId>(i + 1));
         size_t k = 0;
         for (; k + 1 < sizeof(builtins[i].name) && name[k]; ++k)
@@ -661,12 +614,10 @@ static void InitLink() {
     cfg.on_master = OnMaster;
     cfg.on_select_model = OnSelectModel;
     cfg.on_link = OnLink;
-#ifdef SEED_FX
     cfg.on_fx = OnFx;
     cfg.on_param = OnParam;
     cfg.on_chain = OnChain;
     cfg.on_tuner = OnTuner;
-#endif
     slp_rx_init(&link_rx, &cfg);
 }
 
@@ -738,12 +689,9 @@ static void SendTelemetry(AppState &state) {
         st.builtin_id = bypass || state.uploaded ? 0 : static_cast<uint8_t>(state.selected_amp);
         st.model_hash = state.uploaded && !bypass ? state.uploaded_hash : 0;
         st.flags = SLP_STATUS_AUDIO_RUNNING | (bypass ? SLP_STATUS_BYPASS : 0) | (!bypass && !state.model_ready ? SLP_STATUS_MODEL_FAILED : 0);
-#ifdef SEED_FX
         st.flags |= SLP_STATUS_HAS_TUNER;
-#endif
         slp_rx_send_status(&link_rx, &st);
     }
-#ifdef SEED_FX
     // The tuner's reading, 20 times a second while it's on (the detection takes well under 1 ms).
     if (tuner_running && now_ms - state.last_tuner_ms >= kTunerPeriodMs) {
         state.last_tuner_ms = now_ms;
@@ -755,7 +703,6 @@ static void SendTelemetry(AppState &state) {
         t.clarity = static_cast<uint8_t>(clarity < 0 ? 0 : clarity > 100 ? 100 : clarity);
         slp_rx_send_tuner(&link_rx, &t);
     }
-#endif
     if (now_ms - state.last_meters_ms >= 33) {
         state.last_meters_ms = now_ms;
         slp_meters_t m{};
@@ -765,17 +712,12 @@ static void SendTelemetry(AppState &state) {
         slp_rx_send_meters(&link_rx, &m);
     }
 }
-#endif
 
 int main() {
     InitHardware();
-#ifdef SEED_FX
     rig.Init(delay_mem, reverb_mem, chorus_mem); // the SDRAM is up after seed.Init()
     tuner_detector.SetSampleRate(kSeedAudioRate);
-#endif
-#ifdef SEED_LINK
     InitLink();
-#endif
 
     // Load the default amp, start from where the knobs are, and start audio.
     AppState state;
@@ -790,18 +732,12 @@ int main() {
         EnterBootloaderIfRequested();
         ApplyPendingAmpCommand(state);
         ApplyPendingCabinetCommand();
-#ifdef SEED_FX
         ApplyFxKey();
         StopTunerIfAbandoned();
-#endif
-#ifdef SEED_LINK
         PollLink();
         ApplyPendingUpload(state);
-#endif
         ReportStatus(state);
-#ifdef SEED_LINK
         SendTelemetry(state);
-#endif
         seed.DelayMs(1);
     }
 }

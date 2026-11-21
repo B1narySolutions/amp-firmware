@@ -9,7 +9,10 @@ CPP_STANDARD = -std=gnu++20
 OPT = -O2
 LIBDAISY_DIR = libs/libDaisy
 SYSTEM_FILES_DIR = $(LIBDAISY_DIR)/core
-APP_TYPE = BOOT_NONE
+# Runs under the Daisy bootloader like the main firmware, so the two can be flashed in turn without
+# reinstalling it (scripts/flash_boot.sh).
+APP_TYPE = BOOT_SRAM
+LDSCRIPT = make/STM32H750IB_sram_app.lds
 # Set before libDaisy's Makefile, whose plain BUILD_DIR = build an override
 # beats; its rules expand the directory as they are read.
 override BUILD_DIR := build/hwtest-fw
@@ -17,7 +20,6 @@ include $(SYSTEM_FILES_DIR)/Makefile
 include make/warnings.mk
 CPPFLAGS += $(FIRMWARE_WARNINGS)
 
-include make/flash_dfu.mk
 
 $(OBJECTS): make/hwtest.mk
 $(BUILD_DIR)/$(TARGET).elf: make/hwtest.mk $(LIBDAISY_DIR)/build/libdaisy.a

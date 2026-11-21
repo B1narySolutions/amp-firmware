@@ -17,13 +17,11 @@ class NamAudio {
 
     // Call with audio stopped. Failure leaves the path in bypass.
     bool LoadAmpModel(AmpId amp = AmpId::Fender);
-#ifdef SEED_LINK
     // Call with audio stopped. Loads an A2-Lite model uploaded from the touchscreen (weights in
     // the engine's packed order, as LoadAmpModel's embedded ones); the weights must stay valid
     // while it runs. Treated as an amp-only capture: cabinet EQ on, no trims. Failure leaves
     // the path in bypass.
     bool LoadUploadedModel(const float *weights);
-#endif
 
     // Call with audio stopped. Turns the cabinet EQ after the model on or off
     // and clears its memory either way. Each LoadAmpModel resets it to the
