@@ -21,7 +21,7 @@ upload: build
 
 program-dfu: upload
 
-# The touchscreen link (touchscreen repo, seed-firmware/): the same firmware plus the link, in
+# The touchscreen link (../touchscreen): the same firmware plus the link, in
 # build/link/ so it never mixes objects with the plain build. make build and make upload are
 # unchanged.
 LINK_MAKE = $(MAKE) -f make/firmware.mk SEED_LINK=1 BUILD_DIR=build/link

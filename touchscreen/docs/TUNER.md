@@ -65,14 +65,14 @@ fuzzing, the Seed's receiver) have host tests too: `bash tools/run_host_tests.sh
 
 ## Builds and files
 
-The tuner is in the Seed's effects build only (`make link-fx` in `seed-firmware/`): the demo build
+The tuner is in the Seed's effects build only (`make link-fx` in `seed/`): the demo build
 (`make link`) has 28 bytes of internal flash left. It compiles the receiver's `SET_TUNER` hook only
 with `SLP_RX_TUNER`, so the demo build is byte-identical to before.
 
 | File | |
 |---|---|
 | `seed-dsp/tuner.{h,cpp}`, `seed-dsp/test_tuner.cpp` | the detector and its tests |
-| `seed-firmware/src/main.cpp` (`SEED_FX`) | feeding it, `SET_TUNER`, the mute, `TUNER` frames, the 2.5 s timeout |
+| `seed/src/main.cpp` (`SEED_FX`) | feeding it, `SET_TUNER`, the mute, `TUNER` frames, the 2.5 s timeout |
 | `firmware/main/seed_link_proto/` | the two messages and the `HAS_TUNER` status bit |
 | `firmware/main/seed_link.{h,c}` | `seed_link_set_tuner`, `seed_link_get_tuner` |
 | `firmware/main/ui/ui_tuner.{h,c}`, `tuner_note.{h,c}` | the page and its arithmetic |

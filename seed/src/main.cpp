@@ -33,7 +33,7 @@ static bool bypass = false;
 #ifdef SEED_LINK
 // The touchscreen link (make link): the ESP32 touchscreen selects the amp, bypass and master
 // volume/mute over USART1, and gets the DSP load and IN/OUT peaks back. The protocol and its
-// receiver are the touchscreen repo's firmware/main/seed_link_proto/ (docs/SEED_LINK_PROTOCOL.md).
+// receiver are ../touchscreen/firmware/main/seed_link_proto/ (its docs/SEED_LINK_PROTOCOL.md).
 // Without a touchscreen the master gain stays exactly 1, so the sound is the plain build's.
 static std::atomic<float> master_target{1.0f};
 static float master_gain = 1.0f; // Audio callback only.
@@ -69,7 +69,7 @@ static uint32_t upload_requested_hash = 0;
 static constexpr uint32_t kUploadedCommand = 255;
 
 #ifdef SEED_FX
-// The effects (make link-fx; touchscreen repo seed-dsp/effects, as on Marcelo's touchscreen-link
+// The effects (make link-fx; ../touchscreen/seed-dsp/effects, as on Marcelo's touchscreen-link
 // branch): gate, comp and drive before the amp model, chorus, delay and reverb after it, in the
 // touchscreen's chain order. The delay's 196 KB go in the SDRAM (it reads one line); the reverb
 // reads 12 lines every sample, too slow from the SDRAM (about 75 us a block), so its 100 KB go in
@@ -81,7 +81,7 @@ static fx::Rig rig;
 static std::atomic<char> fx_key{0};                // console key for the effects, from the USB interrupt
 static std::atomic<bool> stm_dfu_requested{false}; // 'U': reboot into the STM32's DFU
 
-// The tuner (seed-dsp/tuner, docs/TUNER.md): while the touchscreen's tuner page is open, the audio
+// The tuner (../touchscreen/seed-dsp/tuner, its docs/TUNER.md): while the touchscreen's tuner page is open, the audio
 // callback feeds the guitar's input to the detector and the main loop sends its reading 20 times
 // a second. The page repeats its state each second; without it for 2.5 s (a touchscreen reset, a
 // pulled cable) the tuner stops and its mute lifts, so the amp can't stay silent.

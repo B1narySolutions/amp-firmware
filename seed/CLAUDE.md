@@ -10,7 +10,7 @@ This firmware is one part of a larger capstone project: a portable touchscreen p
 
 ## Commands
 
-Run everything from the repository root.
+Run everything from `seed/` (this firmware's folder in the amp-firmware repository).
 
 | Command | Purpose |
 | --- | --- |
@@ -27,6 +27,7 @@ Run everything from the repository root.
 | `make check-comment-only` | For a change meant to touch comments only: both firmware images must be byte-identical to `BASE` (default `origin/main`) |
 | `make update-engine-digests` | Save the engine's current output as the bit-identical reference, for a change meant to alter it |
 | `make format` / `make format-check` | clang-format `src/` and `tests/`, or fail if anything is unformatted |
+| `make link` / `make link-fx` | The firmware plus the touchscreen link, or the link plus the six effects and the tuner (Daisy bootloader). Both compile `../touchscreen`'s protocol, effects and tuner code, unchanged; `make link-upload` / `make link-fx-upload` flash them |
 | `make compiledb` | Generate `compile_commands.json` for clangd |
 
 Running a single host test (these are targets in `tests/Makefile`, which is run from the root):
@@ -41,7 +42,7 @@ Without the downloaded models, `make test` runs only `nam_processor_test`, `cab_
 
 ## Enforced checks
 
-CI (`.github/workflows/ci.yml`) runs `make check` on every push to `main` and every pull request. A rule that a check enforces is listed here; the rest of this file is guidance a check can't cover.
+CI (the repository root's `.github/workflows/ci.yml`) runs `make check`, `make link` and `make link-fx` on every push to `main` and every pull request. A rule that a check enforces is listed here; the rest of this file is guidance a check can't cover.
 
 - **Warnings are errors.** Our own C++ builds with `-Wall -Wextra -Werror` (`make/warnings.mk`). The firmware builds add `-Wdouble-promotion -Wfloat-conversion`, so float math that silently becomes double is an error. Fix a warning; don't silence it.
 - **Bit-identical engine.** `engine_digest_test` compares every output bit, per amp and through the whole audio path, with `tests/engine_digests.txt`. Run `make update-engine-digests` only for a change meant to alter the output, and say why in the commit.

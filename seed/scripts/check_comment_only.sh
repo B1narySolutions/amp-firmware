@@ -10,14 +10,16 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 root="$PWD"
 base="${1:-origin/main}"
-base_dir="$root/build/comment-only-base"
+worktree="$root/build/comment-only-base"
+# This firmware is seed/ of the amp-firmware repository: BASE's copy of it.
+base_dir="$worktree/seed"
 
 # Check out BASE beside this tree, sharing the pinned libraries and models.
 git rev-parse --verify --quiet "$base^{commit}" >/dev/null || { echo "Unknown base: $base" >&2; exit 1; }
-rm -rf "$base_dir"
+rm -rf "$worktree"
 git worktree prune
-git worktree add --detach --quiet "$base_dir" "$base"
-trap 'git -C "$root" worktree remove --force "$base_dir" 2>/dev/null || rm -rf "$base_dir"' EXIT
+git worktree add --detach --quiet "$worktree" "$base"
+trap 'git -C "$root" worktree remove --force "$worktree" 2>/dev/null || rm -rf "$worktree"' EXIT
 ln -s "$root/libs" "$base_dir/libs"
 mkdir -p "$base_dir/models"
 ln -s "$root/models/local" "$base_dir/models/local"
