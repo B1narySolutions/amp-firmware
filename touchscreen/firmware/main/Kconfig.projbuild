@@ -1,0 +1,100 @@
+menu "Seed link (ESP32 <-> Daisy Seed3)"
+
+    config SEED_LINK_ENABLE
+        bool "Enable the Seed link UART"
+        default y
+        help
+            Runs the Seed link task on the UART below. The console must not use the same UART
+            (sdkconfig.defaults moves it to the native USB Serial/JTAG port).
+
+    config SEED_LINK_UART_NUM
+        int "UART number"
+        range 0 2
+        default 0
+        depends on SEED_LINK_ENABLE
+        help
+            UART0 on GPIO43/44 is what the board's UART selection switch (SW1) routes to the
+            UART2 header (H3, to the Seed) or to the USB TO UART port (CH343, for the mock Seed).
+
+    config SEED_LINK_TX_GPIO
+        int "TX GPIO"
+        default 43
+        depends on SEED_LINK_ENABLE
+
+    config SEED_LINK_RX_GPIO
+        int "RX GPIO"
+        default 44
+        depends on SEED_LINK_ENABLE
+
+    config SEED_LINK_BAUD
+        int "Baud rate"
+        default 230400
+        depends on SEED_LINK_ENABLE
+        help
+            Must match the Seed (and tools/mock_seed.py --baud).
+
+endmenu
+
+menu "Physical knobs"
+
+    choice KNOBS_GPIO6
+        prompt "Use of GPIO6 (the \"GPIO\" header J8)"
+        default KNOBS_GPIO6_NONE if KNOBS_ENCODERS
+        default KNOBS_GPIO6_POT
+        help
+            GPIO6 is the board's only spare pin.
+
+        config KNOBS_GPIO6_POT
+            bool "10k linear pot as master volume (outer legs to 3V3 and GND, wiper to GP6)"
+        config KNOBS_GPIO6_ENCODER_INT
+            bool "INT line of the STEMMA QT encoders (read the bus only when they signal)"
+        config KNOBS_GPIO6_NONE
+            bool "Unused"
+    endchoice
+
+    config KNOBS_ENCODERS
+        bool "Adafruit STEMMA QT rotary encoders on the I2C header (0x36, 0x37)"
+        default y
+        help
+            Master encoder: rotation adjusts stored volume and pressing toggles mute.
+            Parameter encoder: rotation adjusts the open slider; its button is unused.
+            Both use four-wire I2C polling by default.
+
+    config KNOBS_MASTER_ADDRESS
+        hex "Master/mute encoder I2C address"
+        range 0x08 0x77
+        default 0x36
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_PARAMETER_ADDRESS
+        hex "Parameter encoder I2C address"
+        range 0x08 0x77
+        default 0x37
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_MASTER_STEP
+        int "Master encoder step (percent per detent)"
+        range 1 20
+        default 3
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_PARAMETER_STEP
+        int "Parameter encoder step (percent per detent)"
+        range 1 20
+        default 3
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_MASTER_REVERSE
+        bool "Reverse master encoder direction"
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_PARAMETER_REVERSE
+        bool "Reverse parameter encoder direction"
+        depends on KNOBS_ENCODERS
+
+    config KNOBS_ENCODER_REVERSE
+        bool "Reverse encoder direction"
+        default n
+        depends on KNOBS_ENCODERS
+
+endmenu

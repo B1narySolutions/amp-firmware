@@ -1,0 +1,78 @@
+# Based on Waveshare's ESP32-S3-Touch-LCD-7B 17_lvgl_v9_demo sdkconfig.defaults.
+CONFIG_IDF_TARGET="esp32s3"
+CONFIG_FREERTOS_HZ=1000
+CONFIG_ESP_DEFAULT_CPU_FREQ_MHZ_240=y
+CONFIG_COMPILER_OPTIMIZATION_PERF=y
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+
+# Octal PSRAM (8MB) holds the 1024x600 framebuffers.
+CONFIG_SPIRAM=y
+CONFIG_SPIRAM_MODE_OCT=y
+CONFIG_SPIRAM_SPEED_120M=y
+CONFIG_SPIRAM_XIP_FROM_PSRAM=y
+CONFIG_SPIRAM_FETCH_INSTRUCTIONS=y
+CONFIG_SPIRAM_RODATA=y
+CONFIG_SPIRAM_MEMTEST=n
+CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL=64
+CONFIG_SPIRAM_TIMING_MEASURE_TEMPERATURE_INTERVAL_SECOND=5
+CONFIG_ESP32S3_INSTRUCTION_CACHE_32KB=y
+CONFIG_ESP32S3_DATA_CACHE_64KB=y
+CONFIG_ESP32S3_DATA_CACHE_LINE_64B=y
+
+CONFIG_BOOTLOADER_FLASH_DC_AWARE=y
+CONFIG_ESPTOOLPY_FLASHSIZE_16MB=y
+CONFIG_ESPTOOLPY_FLASHMODE_QIO=y
+CONFIG_ESPTOOLPY_FLASHFREQ_120M=y
+CONFIG_SPI_FLASH_HPM_ENA=y
+
+# LVGL
+CONFIG_LV_OS_FREERTOS=y
+CONFIG_LV_USE_CLIB_MALLOC=y
+CONFIG_LV_USE_CLIB_STRING=y
+CONFIG_LV_USE_CLIB_SPRINTF=y
+CONFIG_LV_DEF_REFR_PERIOD=15
+CONFIG_LV_OBJ_STYLE_CACHE=y
+CONFIG_LV_DRAW_SW_DRAW_UNIT_CNT=2
+CONFIG_LV_COLOR_DEPTH_16=y
+CONFIG_LV_FONT_MONTSERRAT_10=y
+CONFIG_LV_FONT_MONTSERRAT_12=y
+CONFIG_LV_FONT_MONTSERRAT_14=y
+CONFIG_LV_FONT_MONTSERRAT_16=y
+CONFIG_LV_FONT_MONTSERRAT_24=y
+# The tuner's note (ui_tuner.c), drawn at 2x.
+CONFIG_LV_FONT_MONTSERRAT_48=y
+
+# Per-core CPU load in Test Mode / the DIAG line (idle-task run time, 1 us esp_timer clock).
+CONFIG_FREERTOS_GENERATE_RUN_TIME_STATS=y
+CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+
+# RGB scan-out robustness. In DOUBLE_DIRECT LVGL renders straight into the PSRAM frame
+# buffer, competing with the bounce-buffer refills for the PSRAM bus; when a refill is late
+# the image shifts, shows static, or the panel loses sync. Keep the refill ISR (and the GDMA
+# ISR it relies on) in IRAM so it never waits on a PSRAM instruction fetch, and re-sync the
+# DMA every VSYNC so a late refill can't leave a permanent offset.
+CONFIG_LCD_RGB_ISR_IRAM_SAFE=y
+CONFIG_LCD_RGB_RESTART_IN_VSYNC=y
+
+# Console and the DIAG line on the native USB port (Type-C "USB", USB Serial/JTAG), which frees
+# UART0 (GPIO43/44) for the Seed link. Needs EXIO5 (USB_SEL) low, see io_expander.c.
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
+
+# Seed link UART: keep its interrupt handler in IRAM so receiving survives the PSRAM bus
+# contention from the RGB refills (the same reason the LCD ISR is IRAM-safe above).
+CONFIG_UART_ISR_IN_IRAM=y
+
+# microSD (FAT32): long file names for .nam files and the .cache/<sha256>.a2l names, with
+# FatFs buffers in PSRAM so the card costs no scarce internal RAM.
+CONFIG_FATFS_LFN_HEAP=y
+CONFIG_FATFS_MAX_LFN=255
+CONFIG_FATFS_ALLOC_PREFER_EXTRAM=y
+
+# Custom partition table: 4 MB app (partitions.csv); NVS keeps its default place and size.
+CONFIG_PARTITION_TABLE_CUSTOM=y
+CONFIG_PARTITION_TABLE_CUSTOM_FILENAME="partitions.csv"
+
+# The SD card's SPI bus doesn't need its interrupt handler in IRAM (it can wait out a flash
+# write); keeping it in flash saves ~4.7 KB of the scarce internal RAM.
+CONFIG_SPI_MASTER_ISR_IN_IRAM=n
